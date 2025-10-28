@@ -1,6 +1,12 @@
 # usuario/urls.py
 from django.urls import path
-from .views import UsuarioRegisterView, UserLogoutView, UserProfileView, PasswordResetRequestView, PasswordResetConfirmView
+from .views import UsuarioRegisterView, UserLogoutView, UserProfileView, PasswordResetRequestView, PasswordResetConfirmView, ProductoViewSet, ClienteViewSet
+from rest_framework.routers import DefaultRouter
+# Crea un router
+router = DefaultRouter()
+# Registra el ViewSet. Esto crea: /api/productos/ y /api/productos/{pk}/
+router.register(r'productos', ProductoViewSet, basename='producto')
+router.register(r'clientes', ClienteViewSet, basename='cliente')
 
 urlpatterns = [
     # Endpoint de Registro: POST a /api/auth/register/
@@ -20,3 +26,5 @@ urlpatterns = [
     # Paso 2: Confirmación (Este endpoint se llamará desde el link del correo)
     path('auth/password/reset/confirm/', PasswordResetConfirmView.as_view(), name='password_reset_confirm'),
 ]
+
+urlpatterns += router.urls

@@ -1,18 +1,21 @@
 # usuario/views.py
-from rest_framework import generics, permissions
+from rest_framework import generics, permissions, viewsets
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from .models import Usuario, Rol
-from .serializers import UsuarioCreateSerializer
+from .models import Usuario, Rol, Producto, Cliente
+from .serializers import UsuarioCreateSerializer, ProductoSerializer, ClienteSerializer
 from rest_framework.permissions import IsAuthenticated
 from django.contrib.auth.tokens import default_token_generator
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.utils.encoding import force_bytes
-
 from django.contrib.auth import password_validation
 from django.core.exceptions import ValidationError
 from django.utils.encoding import force_str
+from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.decorators import action
+import openpyxl
+from .permissions import IsAdminOrVendedor
 
 # Vista para permitir el registro de nuevos usuarios (por defecto, Clientes)
 class UsuarioRegisterView(generics.CreateAPIView):
@@ -55,16 +58,7 @@ class UserProfileView(APIView):
         })
         
         
-class IsAdminOrVendedor(permissions.BasePermission):
-    """
-    Permiso personalizado para permitir acceso solo a Administradores y Vendedores.
-    """
-    def has_permission(self, request, view):
-        # Permite acceso si el usuario está autenticado Y su rol es ADM o VEN
-        return request.user.is_authenticated and (
-            request.user.rol == Rol.ADMINISTRADOR or 
-            request.user.rol == Rol.VENDEDOR
-        )
+
         
 class PasswordResetRequestView(APIView):
     permission_classes = [permissions.AllowAny]
@@ -152,3 +146,92 @@ class PasswordResetConfirmView(APIView):
                 {'detail': 'El enlace de reseteo es inválido o ha expirado.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
+            
+class ProductoViewSet(viewsets.ModelViewSet):
+    queryset = Producto.objects.all().order_by('nombre') # Ordenar por nombre
+    serializer_class = ProductoSerializer
+    # QUITAMOS permission_classes de aquí
+    parser_classes = [MultiPartParser, FormParser]
+
+    # --- MÉTODO PARA PERMISOS DINÁMICOS ---
+    def get_permissions(self):
+        """
+        Define permisos según la acción:
+        - Lectura (GET): Permitida para cualquier usuario autenticado.
+        - Escritura (POST, PUT, PATCH, DELETE): Solo Admin o Vendedor.
+        """
+        if self.action in ['list', 'retrieve']:
+            # Clientes pueden VER la lista y detalles
+            permission_classes = [permissions.IsAuthenticated]
+        else:
+            # Solo Admins/Vendedores pueden CREAR, EDITAR, BORRAR o usar ACCIONES
+            permission_classes = [IsAdminOrVendedor]
+        # Retorna una lista de instancias de las clases de permiso
+        return [permission() for permission in permission_classes]
+
+    # --- ACCIÓN DE CARGA MASIVA ---
+    # Hereda los permisos de escritura definidos en get_permissions
+    @action(detail=False, methods=['post'])
+    def upload_masivo(self, request):
+        """
+        Endpoint para subir un archivo Excel (.xlsx) y crear productos masivamente.
+        """
+        file_obj = request.data.get('file')
+        if not file_obj:
+            return Response({"error": "No se adjuntó ningún archivo."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            workbook = openpyxl.load_workbook(file_obj)
+            sheet = workbook.active
+            created_count = 0
+
+            for row in sheet.iter_rows(min_row=2, values_only=True):
+                try:
+                    # Ajusta el slice si tu excel tiene columnas vacías al inicio
+                    # ej: (nombre, marca, ...) = row[4:11] si empieza en columna E
+                    if len(row) < 7: continue # Salta filas cortas
+                    (nombre, marca, modelo, categoria, precio, stock, garantia_meses) = row[:7]
+
+                    if not nombre or not marca or not categoria:
+                        print(f"Skipping row: Missing required data - {row[:7]}")
+                        continue
+
+                    try:
+                        precio_val = float(precio) if precio is not None else 0.0
+                        stock_val = int(stock) if stock is not None else 0
+                        garantia_val = int(garantia_meses) if garantia_meses is not None else 12
+                    except (ValueError, TypeError):
+                        print(f"Skipping row due to conversion error: {row[:7]}")
+                        continue
+
+                    modelo_val = str(modelo) if modelo is not None else None
+
+                    producto_obj = Producto.objects.create(
+                        nombre=str(nombre), marca=str(marca), modelo=modelo_val, categoria=str(categoria),
+                        precio=precio_val, stock=stock_val, garantia_meses=garantia_val
+                    )
+                    print(f"✅ CREATED Product: ID={producto_obj.id}, Nombre={producto_obj.nombre}")
+                    created_count += 1
+
+                except Exception as e:
+                    print(f"⚠️ Skipping row due to unexpected error: {row[:7]} - Error: {e}")
+                    continue
+
+            print(f"📊 Total products created: {created_count}")
+            return Response(
+                {"detail": f"Carga masiva procesada. {created_count} productos agregados."},
+                status=status.HTTP_201_CREATED
+            )
+
+        except Exception as e:
+            print(f"❌ General error during mass upload: {e}")
+            return Response({"error": f"Error general: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
+            
+class ClienteViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet para Crear, Leer, Actualizar y Eliminar Clientes.
+    Accesible solo para Administradores y Vendedores.
+    """
+    queryset = Cliente.objects.all().order_by('apellido', 'nombre') # Ordenar alfabéticamente
+    serializer_class = ClienteSerializer
+    permission_classes = [IsAdminOrVendedor]

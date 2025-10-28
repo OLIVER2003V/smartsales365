@@ -11,7 +11,9 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 from pathlib import Path
-
+from decouple import config
+import cloudinary
+import stripe
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 import os
@@ -41,6 +43,8 @@ INSTALLED_APPS = [
     'rest_framework.authtoken',
     'usuario',
     'corsheaders',
+    'ventas',
+    'reportes',
 ]
 
 MIDDLEWARE = [
@@ -155,3 +159,23 @@ EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
 DEFAULT_FROM_EMAIL = 'no-reply@smartsales365.com'
 
 PASSWORD_RESET_TEMPLATE = 'registration/password_reset_email.html'
+
+
+# CONFIGURACIÓN CLOUDINARY (Lectura segura desde .env)
+# ----------------------------------------------------
+cloudinary.config(
+  cloud_name = config('CLOUDINARY_CLOUD_NAME'), 
+  api_key = config('CLOUDINARY_API_KEY'), 
+  api_secret = config('CLOUDINARY_API_SECRET'),
+  secure = True # <-- Recomendado para usar HTTPS
+)
+
+STRIPE_SECRET_KEY = config('STRIPE_SECRET_KEY')
+
+# Configura la clave API globalmente para la librería stripe
+stripe.api_key = STRIPE_SECRET_KEY
+
+GEMINI_API_KEY = config('GEMINI_API_KEY', default=None) # Lee la clave
+
+if not GEMINI_API_KEY:
+    print("ADVERTENCIA: GEMINI_API_KEY no encontrada en .env. La generación de reportes con IA no funcionará.")
