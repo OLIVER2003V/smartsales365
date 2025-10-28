@@ -14,20 +14,25 @@ from pathlib import Path
 from decouple import config
 import cloudinary
 import stripe
+import os
+import dj_database_url
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
-import os
+
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-9u8ki%71l7-m1w5%z&$e4b@%wx9$$z3&1#j9!d+)c+@y!u8c^='
 
+SECRET_KEY = config('SECRET_KEY')
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = config('DEBUG', default=False, cast=bool)
 
-ALLOWED_HOSTS = []
+# --- CAMBIO 3: Lee ALLOWED_HOSTS desde el entorno ---
+# En Render, pondrás la URL de tu backend (ej: mi-backend.onrender.com)
+ALLOWED_HOSTS_STRING = config('DJANGO_ALLOWED_HOSTS', default='127.0.0.1,localhost')
+ALLOWED_HOSTS = [host.strip() for host in ALLOWED_HOSTS_STRING.split(',') if host.strip()]
 
 
 # Application definition
@@ -38,6 +43,7 @@ INSTALLED_APPS = [
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
+    'whitenoise.runserver_nostatic',
     'django.contrib.staticfiles',
     'rest_framework',
     'rest_framework.authtoken',
@@ -48,9 +54,12 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
-    'corsheaders.middleware.CorsMiddleware',
+    
+    
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -81,15 +90,20 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
+#DATABASES = {
+#    'default': {
+#        'ENGINE': 'django.db.backends.postgresql',
+#        'NAME': 'smartsalesdb',  # Asegúrate que esta BD exista en PostgreSQL
+#        'USER': 'postgres',      # Cámbialo si tu usuario es diferente
+#        'PASSWORD': 'usuario123',  # Cámbialo si tu contraseña es diferente
+##        'HOST': 'localhost',
+ #       'PORT': '5432',
+ #   }
+#}
+DATABASE_URL = config('DATABASE_URL') # Lee la URL de la variable de entorno
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'smartsalesdb',  # Asegúrate que esta BD exista en PostgreSQL
-        'USER': 'postgres',      # Cámbialo si tu usuario es diferente
-        'PASSWORD': 'usuario123',  # Cámbialo si tu contraseña es diferente
-        'HOST': 'localhost',
-        'PORT': '5432',
-    }
+    'default': dj_database_url.config(default=DATABASE_URL, conn_max_age=600, ssl_require=False)
+    # ssl_require=False es común en Render si usas la Internal URL. Cambia a True si usas la Externa y necesitas SSL.
 }
 
 
@@ -129,6 +143,9 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 
+STATIC_ROOT = BASE_DIR / 'staticfiles' # Directorio donde collectstatic pondrá los archivos
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
@@ -147,10 +164,8 @@ REST_FRAMEWORK = {
     )
 }
 
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-]
-
+CORS_ALLOWED_ORIGINS_STRING = config('CORS_ALLOWED_ORIGINS', default='http://localhost:5173') # Lee desde el entorno
+CORS_ALLOWED_ORIGINS = [origin.strip() for origin in CORS_ALLOWED_ORIGINS_STRING.split(',') if origin.strip()]
 ALLOWED_HOSTS = ['127.0.0.1', 'localhost']
 
 EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend' 
