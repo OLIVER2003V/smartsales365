@@ -25,7 +25,6 @@ SECRET_KEY = env_config('SECRET_KEY') # Lee desde .env
 # DEBUG = env_config('DEBUG', default=False, cast=bool)
 # Establece DEBUG directamente en True
 DEBUG = env_config('DEBUG', default=False, cast=bool)
-print(f"--- ¡¡¡ATENCIÓN!!! DEBUG está FORZADO a: {DEBUG} ---") # Mensaje para recordar
 # -------------------------
 
 ALLOWED_HOSTS_STRING = env_config('DJANGO_ALLOWED_HOSTS', default='127.0.0.1,localhost') # Lee desde .env
