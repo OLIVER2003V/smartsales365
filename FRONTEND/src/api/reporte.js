@@ -2,58 +2,80 @@
 import axios from 'axios';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
-
-// Configuración de cabecera (reutilizada)
-const getConfig = (token) => ({
-    headers: {
-        'Authorization': `Token ${token}`,
-        'Content-Type': 'application/json',
-    },
-});
+const GENERAR_ENDPOINT = `${API_BASE_URL}/api/reportes/generar/`;
+const EXPORTAR_ENDPOINT = `${API_BASE_URL}/api/reportes/exportar/`;
 
 /**
- * Genera un reporte dinámico basado en un prompt de texto.
+ * 1. Llama a la API de IA para interpretar el prompt y devolver los datos JSON.
  * @param {string} token - Token de autenticación.
  * @param {string} prompt - La solicitud del usuario en lenguaje natural.
- * @param {string} formatoDeseado - 'pantalla', 'pdf', 'excel'. Ayuda al backend a priorizar.
- * @returns {Promise<object|Blob>} - Retorna datos JSON o un Blob (archivo).
+ * @returns {Promise<object>} - Retorna la data (JSON) del reporte.
  */
-export const generarReporte = async (token, prompt, formatoDeseado = 'pantalla') => {
+export const generarReporteIA = async (token, prompt) => {
     try {
         const response = await axios.post(
-            `${API_BASE_URL}/api/reportes/generar/`,
+            GENERAR_ENDPOINT,
             { prompt: prompt },
             {
                 headers: {
                     'Authorization': `Token ${token}`,
                     'Content-Type': 'application/json',
-                    // Opcional: Indicar el formato preferido si el prompt no lo especifica
-                    'Accept': formatoDeseado === 'pdf' ? 'application/pdf' :
-                              formatoDeseado === 'excel' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' :
-                              'application/json'
                 },
-                // IMPORTANTE: Define responseType para manejar archivos binarios
-                responseType: (formatoDeseado === 'pdf' || formatoDeseado === 'excel') ? 'blob' : 'json',
+                responseType: "json", // Siempre esperamos JSON
+                validateStatus: (s) => s >= 200 && s < 500
             }
         );
 
-        // Si la respuesta es un archivo (Blob) o JSON
-        return response.data;
+        if (response.status >= 400) {
+            throw new Error(response.data?.error || response.data?.message || `Error ${response.status}`);
+        }
+        return response.data; // Devuelve el JSON
 
     } catch (error) {
-        console.error("Error generando reporte:", error.response?.data || error.message);
+        console.error("Error en generarReporteIA:", error);
+        throw error; // Lanza el error para que el componente lo atrape
+    }
+};
+
+/**
+ * 2. Envía los datos JSON al backend para convertirlos en un archivo (PDF/Excel).
+ * @param {string} token - Token de autenticación.
+ * @param {string} formato - 'pdf' o 'excel'.
+ * @param {object} data - El JSON del reporte (reportData).
+ * @param {string} prompt - El prompt original (para el título del archivo).
+ * @returns {Promise<Blob>} - Retorna el archivo como un Blob.
+ */
+export const exportarReporte = async (token, formato, data, prompt) => {
+    try {
+        const response = await axios.post(
+            EXPORTAR_ENDPOINT,
+            {
+                data: data,
+                formato: formato,
+                prompt: prompt
+            },
+            {
+                headers: { 'Authorization': `Token ${token}` },
+                responseType: "blob", // Esperamos un archivo
+            }
+        );
+        return response.data; // Devuelve el Blob
+
+    } catch (error) {
+        console.error("Error en exportarReporte:", error);
+        
         // Intenta decodificar el error si es un Blob (puede contener JSON de error)
         if (error.response && error.response.data instanceof Blob && error.response.data.type === 'application/json') {
-             try {
-                 const errorJson = JSON.parse(await error.response.data.text());
-                 throw new Error(errorJson.error || errorJson.detail || 'Error en la respuesta del servidor.');
-             } catch (parseError) {
-                  throw new Error('Error desconocido del servidor al generar reporte.');
-             }
+            try {
+                const errorJson = JSON.parse(await error.response.data.text());
+                throw new Error(errorJson.error || errorJson.detail || 'Error en la respuesta del servidor.');
+            } catch (parseError) {
+                throw new Error('Error desconocido del servidor al exportar.');
+            }
         } else if (error.response?.data) {
-             throw new Error(error.response.data.error || error.response.data.detail || 'Error en la solicitud del reporte.');
+            throw new Error(error.response.data.error || error.response.data.detail || 'Error en la solicitud de exportación.');
         } else {
-            throw new Error('Error de conexión al generar reporte.');
+            throw new Error('Error de conexión al exportar.');
         }
     }
 };

@@ -1,258 +1,290 @@
 // src/clientes/AdministrarCliente.jsx
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getClientes } from '../api/cliente'; // <-- API de Cliente
-import ClienteList from './ClienteList'; // <-- Componente de lista
-import ClienteForm from './ClienteForm'; // <-- Componente de formulario
+import { getClientes } from '../api/cliente';
+import { useAuth } from '../context/AuthContext';
+import ClienteList from './ClienteList'; // Componente hijo (asumido)
+import ClienteForm from './ClienteForm'; // Componente hijo (asumido)
+import {
+    Plus,
+    Search,
+    Loader2,
+    ArrowLeft,
+    Users,
+    AlertTriangle,
+    CheckCircle,
+    Info,
+    X
+} from 'lucide-react'; // ✨ Iconos importados de Lucide
 
-// --- Iconos (Definiciones de ejemplo) ---
-// (En un proyecto real, estos vendrían de 'lucide-react', 'heroicons', etc.)
-const PlusIcon = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-  </svg>
-);
-const SearchIcon = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-  </svg>
-);
-const SpinnerIcon = () => (
-  <svg className="animate-spin h-8 w-8 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-  </svg>
-);
-const ArrowLeftIcon = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-  </svg>
-);
-const UserGroupIcon = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-2.29l-1.123.63M17 20v-2m0 2H5.472c-1.33 0-2.522-.68-3.22-1.79C1.135 14.996 1 13.73 1 12.43V10a3 3 0 013-3h12a3 3 0 013 3v2.43c0 1.3-.135 2.566-1.252 3.78C21.043 17.5 19.5 18 18 18H7m10 2v-2a3 3 0 00-5.356-2.29l-1.123.63M17 20H7" />
-  </svg>
-);
+// --- Componentes de UI Locales (Refactorizados) ---
 
-// --- Componentes de UI (Definiciones de ejemplo) ---
+// ✨ MEJORA: Componente de Alerta rediseñado
 const AlertMessage = ({ msg, onDismiss }) => {
-  if (!msg) return null;
-  const isError = msg.startsWith('❌') || msg.startsWith('⚠️');
-  const isSuccess = msg.startsWith('✅');
-  
-  let classes = "w-full p-3 rounded-lg text-sm font-medium flex justify-between items-center";
-  if (isError) classes += " bg-red-100 text-red-800";
-  else if (isSuccess) classes += " bg-green-100 text-green-800";
-  else classes += " bg-blue-100 text-blue-800"; // Info
+    if (!msg) return null;
 
-  return (
-    <div className={classes} role="alert">
-      <span>{msg}</span>
-      {onDismiss && (
-        <button onClick={onDismiss} className="ml-2 font-bold text-lg">&times;</button>
-      )}
-    </div>
-  );
+    let config = {
+        icon: <Info size={18} />,
+        styles: "bg-blue-50 text-blue-700 border-blue-200"
+    };
+
+    if (msg.startsWith('❌') || msg.startsWith('⚠️')) {
+        config = {
+            icon: <AlertTriangle size={18} />,
+            styles: "bg-red-50 text-red-700 border-red-200"
+        };
+    } else if (msg.startsWith('✅')) {
+        config = {
+            icon: <CheckCircle size={18} />,
+            styles: "bg-green-50 text-green-700 border-green-200"
+        };
+    }
+
+    return (
+        <div className={`w-full p-4 rounded-lg border flex justify-between items-center ${config.styles}`} role="alert">
+            <div className="flex items-center gap-3">
+                <span className="flex-shrink-0">{config.icon}</span>
+                <span className="text-sm font-medium">{msg.replace(/^[❌⚠️✅]/, '').trim()}</span>
+            </div>
+            {onDismiss && (
+                <button 
+                    onClick={onDismiss} 
+                    className={`ml-2 p-1 rounded-full hover:bg-black/10 transition-colors ${config.styles}`}
+                >
+                    <X size={18} />
+                </button>
+            )}
+        </div>
+    );
 };
 
+// ✨ MEJORA: Indicador de Carga
 const LoadingIndicator = () => (
-  <div className="flex flex-col items-center justify-center min-h-[400px] text-gray-500">
-    <SpinnerIcon />
-    <p className="mt-3 text-lg font-medium">Cargando clientes...</p>
-  </div>
+    <div className="flex flex-col items-center justify-center min-h-[400px] text-slate-500">
+        <Loader2 className="animate-spin h-12 w-12 text-indigo-600" />
+        <p className="mt-3 text-lg font-medium">Cargando clientes...</p>
+    </div>
 );
+
+// ✨ MEJORA: Estado Vacío (si no hay clientes)
+const EmptyState = ({ onActionClick }) => (
+    <div className="text-center py-20 px-6 bg-white rounded-lg border-2 border-dashed border-gray-300">
+        <Users size={48} className="mx-auto text-slate-400" strokeWidth={1.5} />
+        <h3 className="mt-4 text-lg font-semibold text-slate-900">No hay clientes</h3>
+        <p className="mt-1 text-sm text-slate-500">Aún no se ha registrado ningún cliente.</p>
+        <div className="mt-6">
+            <button
+                type="button"
+                onClick={onActionClick}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+            >
+                <Plus size={18} />
+                Crear Primer Cliente
+            </button>
+        </div>
+    </div>
+);
+
 
 // --- Constantes ---
 const VIEW_MODES = { LIST: 'LIST', CREATE: 'CREATE', EDIT: 'EDIT' };
 
-const AdministrarCliente = ({ token }) => {
-  const [allClientes, setAllClientes] = useState(null);
-  const [filteredClientes, setFilteredClientes] = useState(null);
-  const [message, setMessage] = useState('');
-  const [isLoading, setIsLoading] = useState(true);
-  const [viewMode, setViewMode] = useState(VIEW_MODES.LIST);
-  const [selectedCliente, setSelectedCliente] = useState(null);
-  const [searchTerm, setSearchTerm] = useState('');
-  const navigate = useNavigate();
+// --- Componente Principal ---
+const AdministrarCliente = () => {
+    const [allClientes, setAllClientes] = useState(null); // Inicia como null para diferenciar de "vacío"
+    const [message, setMessage] = useState('');
+    const [isLoading, setIsLoading] = useState(true);
+    const [viewMode, setViewMode] = useState(VIEW_MODES.LIST);
+    const [selectedCliente, setSelectedCliente] = useState(null);
+    const [searchTerm, setSearchTerm] = useState('');
+    const navigate = useNavigate();
+    const { token, user } = useAuth();
 
-  // Función para refrescar clientes
-  const refreshClientes = useCallback(async () => {
-    setIsLoading(true);
-    // setMessage(''); // No limpiar mensaje aquí para que los de éxito se vean
-    try {
-      const clienteList = await getClientes(token);
-      setAllClientes(clienteList);
-      setFilteredClientes(clienteList);
-      // Solo mostrar mensaje de carga si no hay otro mensaje
-      if (!message) {
-        setMessage(`✅ ${clienteList.length} clientes cargados.`);
-        setTimeout(() => setMessage(''), 3000); // Autocerrar mensaje de éxito
-      }
-    } catch (error) {
-      setAllClientes([]);
-      setFilteredClientes([]);
-      if (error.response?.status === 403) {
-        setMessage("❌ Acceso Denegado (403): Rol no permitido.");
-      } else if (error.response?.status === 401) {
-        setMessage("❌ Sesión expirada. Redirigiendo al inicio...");
-        setTimeout(() => navigate('/', { replace: true }), 2000);
-      } else {
-        setMessage("❌ Error al conectar con el API de clientes.");
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  }, [token, navigate, message]); // Añadir 'message' para evitar sobreescritura
+    // Función para refrescar clientes
+    const refreshClientes = useCallback(async () => {
+        if (!token) return;
+        setIsLoading(true); 
+        try {
+            const clienteList = await getClientes(token);
+            setAllClientes(clienteList);
+            if (!message) {
+                // No mostrar toast de éxito en la carga inicial
+            }
+        } catch (error) {
+            setAllClientes([]); // Lista vacía en caso de error
+            if (error.response?.status === 403) {
+                setMessage("❌ Acceso Denegado (403): Rol no permitido.");
+                navigate('/');
+            } else if (error.response?.status === 401) {
+                setMessage("❌ Sesión expirada. Redirigiendo al inicio...");
+                setTimeout(() => navigate('/', { replace: true }), 2000);
+            } else {
+                setMessage("❌ Error al conectar con el API de clientes.");
+            }
+        } finally {
+            setIsLoading(false);
+        }
+    }, [token, navigate, message]); 
 
-  // Carga inicial
-  useEffect(() => {
-    if (!token) {
-      navigate('/', { replace: true });
-      return;
-    }
-    refreshClientes();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, navigate]); // Solo ejecutar en la carga inicial
+    // Carga inicial y protección de ruta
+    useEffect(() => {
+        if (!user || (user.rol !== 'ADM' && user.rol !== 'VEN')) {
+            toast.error('Acceso denegado. Solo Admin o Vendedores.');
+            navigate('/');
+            return;
+        }
+        if (token) {
+            refreshClientes();
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [token, user, navigate]); // Solo se ejecuta si cambian estos valores
 
-  // Filtrado por búsqueda
-  useEffect(() => {
-    if (!allClientes) return;
-    const lowerCaseSearch = searchTerm.toLowerCase();
-    const filtered = allClientes.filter(c =>
-      c.nombre.toLowerCase().includes(lowerCaseSearch) ||
-      c.apellido.toLowerCase().includes(lowerCaseSearch) ||
-      c.email.toLowerCase().includes(lowerCaseSearch) ||
-      (c.telefono && c.telefono.includes(searchTerm))
-    );
-    setFilteredClientes(filtered);
-  }, [searchTerm, allClientes]);
-
-  // Manejar edición
-  const handleEdit = (cliente) => {
-    setSelectedCliente(cliente);
-    setViewMode(VIEW_MODES.EDIT);
-    setMessage(''); // Limpiar mensaje al entrar a editar
-  };
-
-  // Manejar éxito de formulario
-  const handleFormSuccess = (successMessage) => {
-    refreshClientes();
-    setViewMode(VIEW_MODES.LIST);
-    setMessage(successMessage); // Mostrar mensaje de éxito en la lista
-    setTimeout(() => setMessage(''), 3000); // Autocerrar
-  };
-
-  // Manejar cancelación de formulario
-  const handleFormCancel = () => {
-    setViewMode(VIEW_MODES.LIST);
-    setSelectedCliente(null);
-    setMessage(''); // Limpiar mensajes
-  };
-
-  // Renderizado condicional
-  const renderContent = () => {
-    if (isLoading && viewMode === VIEW_MODES.LIST && !allClientes) {
-      return <LoadingIndicator />;
-    }
-
-    switch (viewMode) {
-      case VIEW_MODES.CREATE:
-        return (
-          <ClienteForm
-            token={token}
-            cliente={null}
-            onSuccess={() => handleFormSuccess('✅ Cliente creado exitosamente.')}
-            onCancel={handleFormCancel}
-            setMessage={setMessage}
-          />
+    // Filtrado por búsqueda
+    const filteredClientes = useMemo(() => {
+        if (!allClientes) return [];
+        const lowerCaseSearch = searchTerm.toLowerCase();
+        return allClientes.filter(c =>
+            c.nombre.toLowerCase().includes(lowerCaseSearch) ||
+            c.apellido.toLowerCase().includes(lowerCaseSearch) ||
+            c.email.toLowerCase().includes(lowerCaseSearch) ||
+            (c.telefono && c.telefono.includes(searchTerm))
         );
-      case VIEW_MODES.EDIT:
-        return (
-          <ClienteForm
-            token={token}
-            cliente={selectedCliente}
-            onSuccess={() => handleFormSuccess('✅ Cliente actualizado exitosamente.')}
-            onCancel={handleFormCancel}
-            setMessage={setMessage}
-          />
-        );
-      case VIEW_MODES.LIST:
-      default:
-        return (
-          <ClienteList
-            clientes={filteredClientes}
-            onEdit={handleEdit}
-            refreshClientes={refreshClientes}
-            token={token}
-            setMessage={setMessage}
-            isLoading={isLoading} // Pasar estado de carga a la lista
-          />
-        );
-    }
-  };
+    }, [searchTerm, allClientes]);
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-100 to-gray-200 p-4 md:p-8">
-      <div className="w-full max-w-7xl mx-auto bg-white p-6 md:p-8 rounded-2xl shadow-xl space-y-6">
-        
-        {/* --- Encabezado --- */}
-        <div className="flex flex-col md:flex-row justify-between items-center gap-4 border-b border-gray-200 pb-5">
-          <h1 className="text-3xl md:text-4xl font-bold text-gray-800 flex items-center gap-3">
-            <UserGroupIcon />
-            Gestión de Clientes
-          </h1>
-          {/* Botones */}
-          <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
-            {viewMode === VIEW_MODES.LIST && (
-              <button 
-                onClick={() => { setViewMode(VIEW_MODES.CREATE); setMessage(''); }} 
-                className="btn-primary" // Asumo clase base
-              >
-                <PlusIcon /> Nuevo Cliente
-              </button>
-            )}
-            {viewMode !== VIEW_MODES.LIST && (
-              <button 
-                onClick={handleFormCancel} 
-                className="btn-secondary-outline" // Asumo clase base
-              >
-                <ArrowLeftIcon /> Volver a la Lista
-              </button>
-            )}
-          </div>
-        </div>
+    // --- Navegación y Manejadores ---
+    const handleEdit = (cliente) => {
+        setSelectedCliente(cliente);
+        setViewMode(VIEW_MODES.EDIT);
+        setMessage(''); 
+    };
 
-        {/* --- Barra de Herramientas (Mensaje y Búsqueda) --- */}
-        <div className="space-y-4">
-          {/* Mensaje Global (siempre visible) */}
-          <AlertMessage msg={message} onDismiss={() => setMessage('')} />
-        
-          {viewMode === VIEW_MODES.LIST && (
-            <div className="flex justify-start">
-              {/* Buscador */}
-              <div className="relative w-full md:w-2/5">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <SearchIcon />
+    const handleFormSuccess = (successMessage) => {
+        // Establece el mensaje primero
+        setMessage(successMessage); 
+        // Cambia la vista
+        setViewMode(VIEW_MODES.LIST);
+        setSelectedCliente(null);
+        // Refresca la lista *después* de cambiar la vista
+        refreshClientes(); 
+        // Limpia el mensaje después de 3s
+        setTimeout(() => setMessage(''), 3000); 
+    };
+
+    const handleFormCancel = () => {
+        setViewMode(VIEW_MODES.LIST);
+        setSelectedCliente(null);
+        setMessage(''); 
+    };
+    
+    const handleShowCreate = () => {
+        setViewMode(VIEW_MODES.CREATE);
+        setSelectedCliente(null);
+        setMessage('');
+    };
+
+    // Renderizado condicional del contenido principal
+    const renderContent = () => {
+        if (isLoading && !allClientes) {
+            return <LoadingIndicator />;
+        }
+
+        switch (viewMode) {
+            case VIEW_MODES.CREATE:
+                return (
+                    <ClienteForm
+                        cliente={null}
+                        onSuccess={() => handleFormSuccess('✅ Cliente creado exitosamente.')}
+                        onCancel={handleFormCancel}
+                        setMessage={setMessage}
+                    />
+                );
+            case VIEW_MODES.EDIT:
+                return (
+                    <ClienteForm
+                        cliente={selectedCliente}
+                        onSuccess={() => handleFormSuccess('✅ Cliente actualizado exitosamente.')}
+                        onCancel={handleFormCancel}
+                        setMessage={setMessage}
+                    />
+                );
+            case VIEW_MODES.LIST:
+            default:
+                if (!allClientes) return <LoadingIndicator />; // Caso de seguridad
+                if (allClientes.length === 0 && !isLoading) {
+                    return <EmptyState onActionClick={handleShowCreate} />;
+                }
+                return (
+                    <ClienteList
+                        clientes={filteredClientes}
+                        onEdit={handleEdit}
+                        refreshClientes={refreshClientes}
+                        setMessage={setMessage}
+                        isLoading={isLoading} // Para el spinner de recarga
+                        searchTerm={searchTerm} // Para el estado "sin resultados"
+                    />
+                );
+        }
+    };
+
+    return (
+        // ✨ MEJORA: Fondo y paleta slate
+        <div className="min-h-screen bg-slate-100 p-4 md:p-8">
+            <div className="w-full max-w-7xl mx-auto bg-white p-6 md:p-8 rounded-xl shadow-lg border border-slate-200 space-y-6">
+                
+                {/* --- Encabezado --- */}
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-200 pb-5">
+                    <h1 className="text-3xl font-bold text-slate-900 flex items-center gap-3">
+                        <Users size={30} className="text-indigo-600" />
+                        Gestión de Clientes
+                    </h1>
+                    <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+                        {viewMode === VIEW_MODES.LIST ? (
+                            <button 
+                                onClick={handleShowCreate} 
+                                className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-lg shadow-sm hover:bg-indigo-700 transition focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                            >
+                                <Plus size={18} /> Nuevo Cliente
+                            </button>
+                        ) : (
+                            <button 
+                                onClick={handleFormCancel} 
+                                className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-white text-slate-700 text-sm font-medium rounded-lg border border-slate-300 hover:bg-slate-50 transition focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                            >
+                                <ArrowLeft size={18} /> Volver a la Lista
+                            </button>
+                        )}
+                    </div>
                 </div>
-                <input
-                  type="text"
-                  placeholder="Buscar por nombre, apellido, email..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm placeholder-gray-400"
-                />
-              </div>
-            </div>
-          )}
-        </div>
 
-        {/* --- Contenido Principal --- */}
-        <div className="mt-6 min-h-[400px]">
-          {renderContent()}
+                {/* --- Barra de Herramientas (Mensaje y Búsqueda) --- */}
+                <div className="space-y-4">
+                    <AlertMessage msg={message} onDismiss={() => setMessage('')} />
+                
+                    {viewMode === VIEW_MODES.LIST && allClientes && allClientes.length > 0 && (
+                        <div className="flex justify-start">
+                            <div className="relative w-full md:w-2/5">
+                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                    <Search size={20} className="text-slate-400" />
+                                </div>
+                                <input
+                                    type="text"
+                                    placeholder="Buscar por nombre, apellido, email..."
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                    className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg shadow-sm text-sm bg-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                />
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                {/* --- Contenido Principal --- */}
+                <div className="mt-6 min-h-[400px]">
+                    {renderContent()}
+                </div>
+            </div>
         </div>
-      </div>
-    </div>
-  );
+    );
 };
 
 export default AdministrarCliente;

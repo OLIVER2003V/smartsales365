@@ -1,24 +1,44 @@
-// src/cliente/CheckoutPage.jsx (NUEVO ARCHIVO)
+// src/pagos/CheckoutPage.jsx
 import React from 'react';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements } from '@stripe/react-stripe-js';
 import CheckoutForm from './CheckoutForm';
+
 // Carga Stripe con tu clave publicable (leída desde .env)
 const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
 
-const CheckoutPage = ({ token }) => { // Recibe el token para pasarlo al form
+/**
+ * Componente "Contenedor" para el Checkout.
+ * * Su única responsabilidad es cargar Stripe y proveer el contexto <Elements>.
+ * Toda la UI (fondo, padding, título, etc.) es manejada por el componente hijo <CheckoutForm />
+ * para evitar duplicación de layouts y mantener un diseño limpio.
+ */
+const CheckoutPage = () => {
+    
+    // Opciones para Stripe Elements (apariencia, etc.)
+    // Puedes definir una 'appearance' aquí para que coincida con tu marca.
+    // Ver: https://stripe.com/docs/elements/appearance-api
     const options = {
-        // Opciones de apariencia, etc. Ver docs de Stripe
+        // Ejemplo de apariencia:
+        // appearance: {
+        //   theme: 'stripe',
+        //   variables: {
+        //     colorPrimary: '#6366F1', // indigo-500
+        //     colorBackground: '#ffffff',
+        //     colorText: '#1e293b', // slate-800
+        //     colorDanger: '#ef4444', // red-500
+        //     borderRadius: '8px',
+        //   }
+        // }
     };
 
     return (
-        <div className="min-h-screen bg-gray-100 p-8">
-             <h1 className="text-3xl font-bold text-center mb-8">Finalizar Compra</h1>
-             {/* Envuelve el formulario con Elements */}
-             <Elements stripe={stripePromise} options={options}>
-                 <CheckoutForm token={token} />
-             </Elements>
-        </div>
+        <Elements stripe={stripePromise} options={options}>
+            {/* CheckoutForm ahora maneja el 100% de la UI,
+              incluyendo el min-h-screen y bg-slate-100.
+            */}
+            <CheckoutForm />
+        </Elements>
     );
 };
 

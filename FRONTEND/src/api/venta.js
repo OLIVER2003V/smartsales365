@@ -3,8 +3,12 @@ import axios from 'axios';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
-// Configuración de cabecera (reutilizada)
-const getConfig = (token) => ({
+/**
+ * Crea el objeto de configuración de cabeceras para solicitudes autenticadas.
+ * @param {string} token - El token de autenticación del usuario.
+ * @returns {object} Objeto de configuración de Axios.
+ */
+const getAuthConfig = (token) => ({
     headers: {
         'Authorization': `Token ${token}`,
         'Content-Type': 'application/json',
@@ -12,34 +16,54 @@ const getConfig = (token) => ({
 });
 
 /**
- * 1. CREAR VENTA: Envía los datos del carrito y el cliente al backend.
- * @param {string} token - Token de autenticación.
- * @param {object} ventaData - Datos de la venta ({ cliente: id, detalles: [{ producto: id, cantidad: n }] }).
- * @returns {Promise<object>} La venta creada.
+ * Obtiene TODAS las ventas (para Admins) o SOLO las ventas
+ * del cliente logueado (para Clientes).
+ * El backend (VentaViewSet) maneja este filtro automáticamente.
  */
-export const createVenta = async (token, ventaData) => {
-    try {
-        const response = await axios.post(`${API_BASE_URL}/api/ventas/`, ventaData, getConfig(token));
-        return response.data;
-    } catch (error) {
-        console.error("Error creating venta:", error.response?.data || error.message);
-        throw error; // Propaga el error para que el componente lo maneje
-    }
+export const getVentas = async (token) => {
+    const response = await axios.get(
+        `${API_BASE_URL}/api/ventas/`,
+        getAuthConfig(token)
+    );
+    return response.data;
 };
 
 /**
- * 2. LISTAR VENTAS: Obtiene el historial de ventas (filtrado por rol en el backend).
- * @param {string} token - Token de autenticación.
- * @returns {Promise<Array>} Lista de objetos Venta.
+ * Obtiene los detalles de UNA SOLA venta por su ID.
+ * Usado para la página de "Pago Exitoso" y detalles.
  */
-export const getVentas = async (token) => {
-    try {
-        const response = await axios.get(`${API_BASE_URL}/api/ventas/`, getConfig(token));
-        return response.data;
-    } catch (error) {
-        console.error("Error fetching ventas:", error.response?.data || error.message);
-        throw error;
-    }
+export const getVentaById = async (token, ventaId) => {
+    const response = await axios.get(
+        `${API_BASE_URL}/api/ventas/${ventaId}/`,
+        getAuthConfig(token)
+    );
+    return response.data;
 };
 
-// Puedes añadir getVentaById(token, id) si necesitas ver detalles específicos
+/**
+ * Crea una nueva venta.
+ * Usado por el CheckoutForm.
+ */
+export const createVenta = async (token, ventaData) => {
+    const response = await axios.post(
+        `${API_BASE_URL}/api/ventas/`,
+        ventaData,
+        getAuthConfig(token)
+    );
+    return response.data;
+};
+
+/**
+ * Descarga el comprobante en PDF de una venta específica.
+ * NOTA: Esta función es especial, devuelve un 'blob' (archivo).
+ */
+export const descargarComprobanteVenta = async (token, ventaId) => {
+    const response = await axios.get(
+        `${API_BASE_URL}/api/ventas/${ventaId}/comprobante/`,
+        {
+            headers: { 'Authorization': `Token ${token}` },
+            responseType: 'blob' // ¡Muy importante!
+        }
+    );
+    return response.data; // Esto será el archivo PDF como un blob
+};

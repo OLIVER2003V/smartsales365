@@ -1,5 +1,5 @@
+// src/reportes/GeneradorReportes.jsx
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import axios from "axios";
 import toast from "react-hot-toast";
 import {
   ResponsiveContainer,
@@ -12,28 +12,15 @@ import {
   Legend,
 } from "recharts";
 import {
-  BrainCircuit,
-  Download,
-  FileText,
-  Table,
-  BarChart3,
-  Loader2,
-  Send,
-  Info,
-  CheckCircle,
-  XCircle,
-  Sparkles,
-  History,
-  Copy,
-  Sigma,
-  Mic,
-  Square,
-  Languages,
+  BrainCircuit, Download, FileText, Table, BarChart3, Loader2, Send,
+  Info, CheckCircle, XCircle, Sparkles, History, Copy, Sigma, Mic, Square, Languages
 } from "lucide-react";
+import { useNavigate } from 'react-router-dom'; // <-- CAMBIO: Importar useNavigate
 
-// ================== CONFIG ==================
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
-const REPORT_ENDPOINT = `${API_BASE_URL}/api/reportes/generar/`;
+// --- API ---
+import { generarReporteIA, exportarReporte } from "../api/reporte";
+// --- CONTEXTO ---
+import { useAuth } from '../context/AuthContext'; // <-- CAMBIO: Importar hook
 
 // ================== UTILS ==================
 const SpinnerIcon = ({ className = "h-5 w-5" }) => (
@@ -101,7 +88,7 @@ const buildFilename = (prefix, prompt, ext) => {
   return `${prefix}_${clean || "reporte"}_${ts}.${ext}`;
 };
 
-// ================== EXPORTACIÓN CLIENT-SIDE ==================
+// ================== EXPORTACIÓN CSV (CLIENT-SIDE) ==================
 const exportCSV = (rows, filename) => {
   if (!Array.isArray(rows) || !rows.length) return;
   const headers = Object.keys(rows[0]);
@@ -126,81 +113,6 @@ const exportCSV = (rows, filename) => {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
-};
-
-const exportPDF = async (rows, filename, title = "Reporte SmartSales") => {
-  if (!Array.isArray(rows) || !rows.length) return;
-  try {
-    const jsPDFModule = await import("jspdf");
-    const autoTable = await import("jspdf-autotable"); // side-effect registra autoTable
-    const { jsPDF } = jsPDFModule;
-
-    const doc = new jsPDF({ unit: "pt", format: "a4" });
-    const marginX = 40;
-
-    // Header
-    doc.setFontSize(16);
-    doc.text(title, marginX, 48);
-    doc.setFontSize(10);
-    doc.setTextColor(120);
-    doc.text(new Date().toLocaleString(), marginX, 66);
-
-    const headers = Object.keys(rows[0]);
-    const body = rows.map((r) => headers.map((h) => {
-      const val = r[h];
-      if (val === null || val === undefined) return "";
-      if (typeof val === "string" && val.length > 100) return val.slice(0, 100) + "…";
-      return typeof val === "object" ? "[Objeto]" : String(val);
-    }));
-
-    // Totales simples (para columnas numéricas)
-    const totals = {};
-    headers.forEach((h) => {
-      if (rows.every((r) => isNumeric(r[h]) || r[h] == null)) {
-        totals[h] = rows.reduce((acc, r) => acc + (Number(r[h]) || 0), 0);
-      }
-    });
-
-    // Tabla
-    doc.autoTable({
-      head: [headers.map(humanize)],
-      body,
-      startY: 84,
-      styles: { fontSize: 9, cellPadding: 6 },
-      headStyles: { fillColor: [30, 64, 175], textColor: 255 }, // azul
-      alternateRowStyles: { fillColor: [248, 250, 252] },
-      didDrawPage: (data) => {
-        // Footer con paginación
-        const str = `Página ${doc.internal.getNumberOfPages()}`;
-        doc.setFontSize(9);
-        doc.setTextColor(120);
-        doc.text(str, data.settings.margin.left, doc.internal.pageSize.getHeight() - 10);
-      },
-    });
-
-    // Fila de Totales
-    const totalsRow = headers.map((h, idx) => {
-      if (idx === 0) return "Total";
-      if (typeof totals[h] === "number") return totals[h].toLocaleString("es-ES", { maximumFractionDigits: 2 });
-      return "";
-    });
-    // Agrega fila de totales si hay al menos un total
-    if (Object.keys(totals).length > 0) {
-      const lastY = doc.lastAutoTable.finalY || 84;
-      doc.autoTable({
-        head: [],
-        body: [totalsRow],
-        startY: lastY + 8,
-        styles: { fontSize: 10, fontStyle: "bold" },
-        theme: "plain",
-      });
-    }
-
-    doc.save(filename);
-  } catch (e) {
-    console.error(e);
-    toast.error("Falta instalar dependencias: npm i jspdf jspdf-autotable");
-  }
 };
 
 // ================== TABLA (con totales y header/footers sticky) ==================
@@ -335,7 +247,7 @@ const useSpeechToPrompt = (onFinalText) => {
   const [supported, setSupported] = useState(true);
   const [listening, setListening] = useState(false);
   const [interim, setInterim] = useState("");
-  const [lang, setLang] = useState("es-ES"); // puedes exponer selector
+  const [lang, setLang] = useState("es-ES"); // Cambiado a es-ES como default más seguro
 
   useEffect(() => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -388,6 +300,9 @@ const useSpeechToPrompt = (onFinalText) => {
       toast.success("Grabando… habla ahora");
     } catch (e) {
       console.error(e);
+      if (e.name === 'NotAllowedError') {
+        toast.error("Permiso de micrófono denegado.");
+      }
     }
   };
   const stop = () => {
@@ -411,57 +326,54 @@ const presets = [
 ];
 
 export default function GeneradorReportes() {
-  const token = localStorage.getItem("token");
+  // --- CAMBIO: Obtener token y user del contexto ---
+  const { token, user } = useAuth();
+  const navigate = useNavigate();
+
   const [prompt, setPrompt] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [reportData, setReportData] = useState(null);
+  const [reportData, setReportData] = useState(null); 
   const [lastResultType, setLastResultType] = useState(null);
-  const [lastPrompt, setLastPrompt] = useState("");
+  const [lastPrompt, setLastPrompt] = useState(""); 
   const [history, setHistory] = useState([]);
 
+  // --- CAMBIO: Hook de protección de ruta ---
+  useEffect(() => {
+    if (!user || (user.rol !== 'ADM' && user.rol !== 'VEN')) {
+      toast.error('Acceso denegado. Solo Admin o Vendedores.');
+      navigate('/');
+    }
+  }, [user, navigate]);
+
+
   const canExport = useMemo(() => Array.isArray(reportData) && reportData.length > 0, [reportData]);
-
-  // Mic: cuando llega texto final, lo ponemos en prompt y disparamos reporte
-  const onFinalSpeech = useCallback(
-    (txt) => {
+  const mic = useSpeechToPrompt(
+    useCallback((txt) => {
       setPrompt(txt);
-      // dispara búsqueda automáticamente
       setTimeout(() => handleGenerate(txt), 50);
-    },
+    }, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    []
-  );
-  const mic = useSpeechToPrompt(onFinalSpeech);
-
-  const requestReportAPI = useCallback(
-    async (currentPrompt, fmt = "pantalla") => {
-      const headers = { Authorization: `Token ${token}` };
-      const body = { prompt: currentPrompt, formato: fmt };
-      const opts = { headers, responseType: fmt === "pantalla" ? "json" : "blob", validateStatus: (s) => s >= 200 && s < 500 };
-      const res = await axios.post(REPORT_ENDPOINT, body, opts);
-      if (res.status >= 400) {
-        if (fmt === "pantalla") throw new Error(res.data?.error || res.data?.message || `Error ${res.status}`);
-        const txt = await res.data.text?.();
-        throw new Error(txt || `Error ${res.status}`);
-      }
-      return res.data;
-    },
-    [token]
+    [])
   );
 
   const handleGenerate = useCallback(
     async (forcedPrompt) => {
       const currentPrompt = (forcedPrompt ?? prompt).trim();
       if (!currentPrompt) return toast.error("Escribe tu solicitud o usa el micrófono.");
+      if (!token) return toast.error("Sesión no válida. Por favor, inicia sesión de nuevo.");
+
       setIsLoading(true);
       setReportData(null);
       setLastResultType(null);
       setLastPrompt("");
       const tId = toast.loading("Interpretando y generando reporte…");
       try {
-        const data = await requestReportAPI(currentPrompt, "pantalla");
-        setReportData(data);
-        setLastPrompt(currentPrompt);
+        // 'token' ahora viene del contexto
+        const data = await generarReporteIA(token, currentPrompt);
+        
+        setReportData(data); 
+        setLastPrompt(currentPrompt); 
+        
         if (Array.isArray(data) && data.length) {
           setLastResultType("data");
           setHistory((h) => [currentPrompt, ...h.filter((p) => p !== currentPrompt)].slice(0, 6));
@@ -473,12 +385,12 @@ export default function GeneradorReportes() {
       } catch (e) {
         console.error(e);
         setLastResultType("error");
-        toast.error(e?.message || "Error inesperado", { id: tId });
+        toast.error(e?.message || "Error inesperado", { id: tId }); 
       } finally {
         setIsLoading(false);
       }
     },
-    [prompt, requestReportAPI]
+    [prompt, token] // <-- CAMBIO: 'token' es ahora una dependencia
   );
 
   const copyJSON = async () => {
@@ -490,20 +402,51 @@ export default function GeneradorReportes() {
       toast.error("No se pudo copiar");
     }
   };
-
+  
   const downloadCSV = () => {
     if (!canExport) return toast.error("Nada para exportar");
     exportCSV(reportData, buildFilename("reporte_smartsales", lastPrompt, "csv"));
   };
 
-  const downloadPDF = () => {
-    if (!canExport) return toast.error("Nada para exportar");
-    exportPDF(reportData, buildFilename("reporte_smartsales", lastPrompt, "pdf"), "Reporte SmartSales");
+  const handleExport = async (formato) => {
+    if (!canExport) return toast.error("No hay datos para exportar.");
+    if (!lastPrompt) return toast.error("Error: no se guardó la consulta. Intenta generar de nuevo.");
+    if (!token) return toast.error("Sesión no válida. Por favor, inicia sesión de nuevo.");
+
+    const tId = toast.loading(`Generando ${formato.toUpperCase()} en el servidor…`);
+    setIsLoading(true);
+
+    try {
+      // 'token' viene del contexto
+      const blob = await exportarReporte(token, formato, reportData, lastPrompt);
+      
+      const ext = formato === 'pdf' ? 'pdf' : 'xlsx';
+      const contentType = formato === 'pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+      const url = window.URL.createObjectURL(new Blob([blob], { type: contentType }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = buildFilename("reporte_smartsales", lastPrompt, ext);
+      document.body.appendChild(a);
+      a.click();
+      
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      toast.success(`${formato.toUpperCase()} descargado.`, { id: tId });
+
+    } catch (e) {
+      console.error(e);
+      toast.error(e?.message || `Error al descargar el ${formato.toUpperCase()}`, { id: tId });
+    } finally {
+      setIsLoading(false);
+    }
   };
+
 
   return (
     <div className="min-h-screen bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-100 via-slate-50 to-white p-4 md:p-8">
       <div className="max-w-7xl mx-auto bg-white/80 backdrop-blur-lg supports-[backdrop-filter]:bg-white/70 p-6 md:p-8 rounded-2xl shadow-xl border border-white/40 space-y-8">
+        
         {/* Header */}
         <div className="text-center border-b border-gray-200/80 pb-6">
           <div className="mx-auto h-14 w-14 flex items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-lg">
@@ -531,8 +474,6 @@ export default function GeneradorReportes() {
             className="w-full p-4 border border-slate-300 rounded-xl shadow-sm text-base focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent placeholder:text-slate-400"
             disabled={isLoading}
           />
-
-          {/* Mic controls */}
           <div className="flex flex-col sm:flex-row sm:items-center gap-3">
             <div className="flex items-center gap-2">
               <Languages size={18} className="text-slate-600" />
@@ -542,13 +483,11 @@ export default function GeneradorReportes() {
                 onChange={(e) => mic.setLang(e.target.value)}
                 disabled={!mic.supported || mic.listening}
               >
-        
-                <option value="es-BO">Español (Bolivia)*</option>
-                
+                <option value="es-ES">Español (España)</option>
+                <option value="es-BO">Español (Bolivia)</option>
               </select>
-              <span className="text-xs text-slate-500">(*si no existe en tu navegador, usa es-ES)</span>
+              <span className="text-xs text-slate-500">(Navegador puede usar es-ES)</span>
             </div>
-
             <div className="flex items-center gap-2">
               {!mic.supported ? (
                 <AlertMessage message="Tu navegador no soporta reconocimiento de voz Web Speech API." type="warn" />
@@ -574,8 +513,6 @@ export default function GeneradorReportes() {
               )}
             </div>
           </div>
-
-          {/* Presets */}
           <div className="flex flex-wrap gap-2 pt-2">
             <span className="text-sm font-medium text-slate-500 self-center">Sugerencias:</span>
             {presets.map((p) => (
@@ -641,7 +578,6 @@ export default function GeneradorReportes() {
 
             {!isLoading && lastResultType === "data" && Array.isArray(reportData) && reportData.length > 0 && (
               <div className="space-y-10">
-                {/* Tabla primero */}
                 <section>
                   <h3 className="text-xl font-semibold mb-3 text-slate-900 flex items-center gap-2">
                     <Table size={20} /> Datos Completos
@@ -649,12 +585,12 @@ export default function GeneradorReportes() {
                   <ReportTable data={reportData} />
                 </section>
 
-                {/* Botones de export (cliente) */}
+                {/* Botones de export */}
                 <section className="pt-2">
                   <div className="flex flex-col sm:flex-row justify-end items-center gap-3">
                     <span className="text-sm font-medium text-gray-600 mr-3">Exportar datos actuales:</span>
                     <button
-                      onClick={copyJSON}
+                      onClick={copyJSON} 
                       disabled={!canExport}
                       className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2 border border-gray-300 bg-white text-gray-700 font-medium rounded-md hover:bg-gray-50 text-sm disabled:opacity-50"
                     >
@@ -668,16 +604,22 @@ export default function GeneradorReportes() {
                       <Download size={16} /> CSV
                     </button>
                     <button
-                      onClick={downloadPDF}
-                      disabled={!canExport}
+                      onClick={() => handleExport('pdf')} 
+                      disabled={!canExport || isLoading}
                       className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-red-600 text-white font-medium rounded-md hover:bg-red-700 text-sm disabled:opacity-50"
                     >
                       <FileText size={16} /> PDF
                     </button>
+                    <button
+                      onClick={() => handleExport('excel')}
+                      disabled={!canExport || isLoading}
+                      className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-green-600 text-white font-medium rounded-md hover:bg-green-700 text-sm disabled:opacity-50"
+                    >
+                      <Download size={16} /> Excel
+                    </button>
                   </div>
                 </section>
 
-                {/* Gráfico después de la tabla */}
                 <section>
                   <h3 className="text-xl font-semibold mb-3 text-slate-900 flex items-center gap-2">
                     <BarChart3 size={20} /> Visualización

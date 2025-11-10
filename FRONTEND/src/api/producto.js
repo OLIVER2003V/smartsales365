@@ -25,6 +25,15 @@ export const getProducts = async (token) => {
     }
 };
 
+export const getProductos = async (token) => {
+    try {
+        const response = await axios.get(`${API_BASE_URL}/api/productos/`, getConfig(token));
+        return response.data;
+    } catch (error) {
+        throw error;
+    }
+};
+
 /**
  * 2. CREAR: Envía los datos de un nuevo producto, incluyendo la imagen.
  */
@@ -74,3 +83,21 @@ export const uploadMassiveProducts = async (token, fileData) => {
         throw error;
     }
 };
+
+// --- ✨ AÑADE ESTA NUEVA FUNCIÓN ---
+export const getProductoById = async (token, id) => {
+    const config = {
+        headers: {
+            'Authorization': `Token ${token}`
+        }
+    };
+    try {
+        // Asumiendo que tu endpoint para un solo producto es /api/productos/{id}/
+        const response = await axios.get(`${API_BASE_URL}/api/productos/${id}/`, config);
+        return response.data;
+    } catch (error) {
+        console.error(`Error al obtener el producto ${id}:`, error.response?.data || error.message);
+        throw error.response?.data || new Error('Error al obtener el producto.');
+    }
+};
+// --- FIN DE LA NUEVA FUNCIÓN ---
