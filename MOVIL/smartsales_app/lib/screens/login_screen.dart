@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import '../services/auth_service.dart';
+import 'package:provider/provider.dart';
+import 'package:smartsales_app/providers/auth_provider.dart';
+// 1. Ya no necesitas AuthService aquí, el Provider se encarga
+// import '../services/auth_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -12,7 +14,7 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
-  final _authService = AuthService();
+  // 2. Ya no necesitas _authService aquí
   String _message = '';
   bool _isLoading = false;
 
@@ -23,31 +25,35 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
-      final token = await _authService.login(
+      // 3. ❗️ Llama al método login del provider
+      // (Esto ya lo tenías correcto de la vez pasada)
+      await Provider.of<AuthProvider>(context, listen: false).login(
         _usernameController.text,
         _passwordController.text,
       );
-      
-      // Guardar el token
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('token', token);
 
-      // Navegar a la pantalla de perfil
-      Navigator.pushReplacementNamed(context, '/profile');
+      // 4. ❗️❗️ LA CORRECCIÓN ESTÁ AQUÍ ❗️❗️
+      // Navegamos al SHELL (la nueva pantalla principal), no al catálogo.
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, '/shell');
+      }
 
     } catch (e) {
       setState(() {
         _message = e.toString().replaceAll('Exception: ', '');
       });
     } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    // ... tu build method (no necesita cambios) ...
     return Scaffold(
       body: Center(
         child: SingleChildScrollView(

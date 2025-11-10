@@ -1,35 +1,40 @@
 // lib/services/auth_service.dart
 import 'package:dio/dio.dart';
+import 'package:smartsales_app/models/user_model.dart'; // 1. Importar el modelo User
+import 'api_config.dart';
 
 class AuthService {
-  // ❗️ Reemplaza esta IP con la IP local de TU computadora
-  final String _baseUrl = 'http://192.168.100.148/api'; 
   final Dio _dio = Dio();
 
-  // Función para Iniciar Sesión
+  // --- Helper para la Configuración de Auth (estilo Dio) ---
+  Options _getAuthConfig(String token) {
+    return Options(
+      headers: {
+        'Authorization': 'Token $token',
+        'Content-Type': 'application/json',
+      },
+    );
+  }
+
+  // --- TUS FUNCIONES EXISTENTES (Están perfectas) ---
+  
   Future<String> login(String username, String password) async {
     try {
       final response = await _dio.post(
-        '${_baseUrl.replaceAll("/api", "")}/auth/login/', // Ajuste para el endpoint de login de authtoken
-        data: {
-          'username': username,
-          'password': password,
-        },
+        '${ApiConfig.baseUrl}/auth/login/',
+        data: { 'username': username, 'password': password },
       );
-      // Django-rest-framework authtoken devuelve el token en la clave 'token'
       if (response.data['token'] != null) {
         return response.data['token'];
       } else {
-        throw Exception('Token no encontrado en la respuesta');
+        throw Exception('Token no encontrado');
       }
     } on DioException catch (e) {
-      // Manejar errores de la petición
       print('Error en login: ${e.response?.data}');
       throw Exception('Error al iniciar sesión: Credenciales inválidas');
     }
   }
 
-  // Función para Registrar un Usuario
   Future<void> register({
     required String username,
     required String email,
@@ -40,7 +45,7 @@ class AuthService {
   }) async {
     try {
       await _dio.post(
-        '$_baseUrl/auth/register/',
+        '${ApiConfig.baseUrl}/api/auth/register/',
         data: {
           'username': username,
           'email': email,
@@ -56,11 +61,10 @@ class AuthService {
     }
   }
 
-  // Función para Solicitar Reseteo de Contraseña
   Future<Map<String, dynamic>> requestPasswordReset(String email) async {
     try {
       final response = await _dio.post(
-        '$_baseUrl/auth/password/reset/',
+        '${ApiConfig.baseUrl}/api/auth/password/reset/',
         data: {'email': email},
       );
       return response.data;
@@ -70,7 +74,6 @@ class AuthService {
     }
   }
 
-  // Función para Confirmar la nueva contraseña
   Future<void> confirmPasswordReset({
     required String uid,
     required String token,
@@ -78,7 +81,7 @@ class AuthService {
   }) async {
     try {
       await _dio.post(
-        '$_baseUrl/auth/password/reset/confirm/',
+        '${ApiConfig.baseUrl}/api/auth/password/reset/confirm/',
         data: {
           'uid': uid,
           'token': token,
@@ -88,9 +91,69 @@ class AuthService {
       );
     } on DioException catch (e) {
       print('Error en confirmPasswordReset: ${e.response?.data}');
-      // Devuelve el mensaje específico del backend si es posible
       final errorMsg = e.response?.data['detail'] ?? 'El enlace es inválido o ha expirado.';
       throw Exception(errorMsg);
+    }
+  }
+
+  // --- ❗️ INICIO: NUEVAS FUNCIONES DE PERFIL ❗️ ---
+
+  /// (GET /api/profile/) Obtiene los datos del perfil del usuario.
+  Future<User> getProfile(String token) async {
+    try {
+      final response = await _dio.get(
+        '${ApiConfig.baseUrl}/api/profile/',
+        options: _getAuthConfig(token),
+      );
+      return User.fromJson(response.data);
+    } on DioException catch (e) {
+      print('Error en getProfile: ${e.response?.data}');
+      throw Exception('Error al cargar el perfil');
+    }
+  }
+
+  /// (PATCH /api/profile/) Actualiza datos del perfil.
+  Future<User> updateProfile(String token, Map<String, dynamic> data) async {
+    try {
+      final response = await _dio.patch(
+        '${ApiConfig.baseUrl}/api/profile/',
+        data: data,
+        options: _getAuthConfig(token),
+      );
+      return User.fromJson(response.data);
+    } on DioException catch (e) {
+      print('Error en updateProfile: ${e.response?.data}');
+      final errorMsg = e.response?.data['email']?[0] ?? 'Error al actualizar el perfil';
+      throw Exception(errorMsg);
+    }
+  }
+
+  /// (POST /api/auth/password/change/) Cambia la contraseña del usuario.
+  Future<void> changePassword(String token, Map<String, String> passwordData) async {
+    try {
+      await _dio.post(
+        '${ApiConfig.baseUrl}/api/auth/password/change/',
+        data: passwordData,
+        options: _getAuthConfig(token),
+      );
+    } on DioException catch (e) {
+      print('Error en changePassword: ${e.response?.data}');
+      final errorMsg = e.response?.data['old_password']?[0] ??
+                       e.response?.data['new_password2']?[0] ??
+                       'Error al cambiar la contraseña';
+      throw Exception(errorMsg);
+    }
+  }
+
+  /// (POST /api/auth/logout/) Cierra la sesión en el servidor.
+  Future<void> serverLogout(String token) async {
+    try {
+      await _dio.post(
+        '${ApiConfig.baseUrl}/api/auth/logout/',
+        options: _getAuthConfig(token),
+      );
+    } on DioException {
+      print('Error en server logout (ignorable)');
     }
   }
 }
