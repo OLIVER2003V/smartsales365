@@ -1,85 +1,78 @@
 # ventas/models.py
 from django.db import models
-from django.conf import settings # Para referenciar al Usuario
-# Importa los modelos Cliente y Producto desde la app 'usuario'
+from django.conf import settings 
 from usuario.models import Cliente, Producto
-
+import uuid
 # =========================================================
-# Modelo: Venta (Cabecera de la transacción)
+# Modelo: Venta (Ahora también actúa como Pedido)
 # =========================================================
 class Venta(models.Model):
-    # --- Estado de la Venta (Opcional, pero útil) ---
+    # --- ¡CAMBIO AQUÍ! ---
+    # Añadimos los estados de cumplimiento del pedido
     class EstadoVenta(models.TextChoices):
-        PENDIENTE = 'PEN', 'Pendiente' # Ej: Carrito abandonado o pago no confirmado
-        COMPLETADA = 'COM', 'Completada' # Pago confirmado, stock descontado
-        CANCELADA = 'CAN', 'Cancelada' # Venta anulada
+        PAGADO = 'PAG', 'Pagado' # El cliente pagó, pendiente de envío (CU18)
+        EN_TRANSITO = 'ENT', 'En Tránsito' # El admin lo marcó como enviado
+        ENTREGADO = 'OK', 'Entregado' # El admin lo marcó como completado
+        CANCELADO = 'CAN', 'Cancelado' # El admin (o sistema) lo canceló
 
-    # --- Relaciones ---
-    # Vincula a un Cliente (puede ser nulo si es venta anónima, aunque no recomendado)
+    # --- Relaciones (Sin cambios) ---
     cliente = models.ForeignKey(
         Cliente,
-        on_delete=models.SET_NULL, # Si se borra el cliente, la venta no se borra, solo pierde la ref.
+        on_delete=models.SET_NULL, 
         related_name='ventas',
-        null=True, # Permite ventas sin cliente registrado (ej. invitado)
+        null=True, 
         blank=True
     )
-    # Vincula al Vendedor que registró la venta (si aplica)
     vendedor = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL, # Si se borra el vendedor, la venta no se borra
+        on_delete=models.SET_NULL, 
         related_name='ventas_registradas',
-        limit_choices_to={'rol': 'VEN'}, # Solo usuarios con rol Vendedor
+        limit_choices_to={'rol': 'VEN'}, 
         null=True,
         blank=True
     )
 
-    # --- Información de la Venta ---
+    # --- Información de la Venta (Cambio en 'estado') ---
     fecha_venta = models.DateTimeField(auto_now_add=True, help_text="Fecha y hora en que se creó la venta")
     total = models.DecimalField(max_digits=12, decimal_places=2, default=0.00, help_text="Monto total de la venta")
+    
+    # --- ¡CAMBIO AQUÍ! ---
+    # El estado por defecto ahora es PAGADO (después del checkout)
     estado = models.CharField(
         max_length=3,
         choices=EstadoVenta.choices,
-        default=EstadoVenta.PENDIENTE,
-        help_text="Estado actual de la transacción"
+        default=EstadoVenta.PAGADO, # Cambiamos PENDIENTE por PAGADO
+        help_text="Estado actual de la transacción y envío"
     )
-    # Puedes añadir campos como método de pago, referencia de pago (Stripe/PayPal), etc.
-    # metodo_pago = models.CharField(max_length=50, blank=True, null=True)
-    # referencia_pago = models.CharField(max_length=100, blank=True, null=True)
 
     def __str__(self):
         cliente_str = self.cliente.nombre if self.cliente else "Invitado"
-        return f"Venta #{self.id} - {cliente_str} - {self.fecha_venta.strftime('%Y-%m-%d')}"
+        return f"Venta #{self.id} - {cliente_str} - {self.get_estado_display()}" # Muestra el estado
 
     class Meta:
-        verbose_name = 'Venta'
-        verbose_name_plural = 'Ventas'
-        ordering = ['-fecha_venta'] # Ordenar por fecha descendente por defecto
+        verbose_name = 'Venta/Pedido'
+        verbose_name_plural = 'Ventas/Pedidos'
+        ordering = ['-fecha_venta'] 
 
 # =========================================================
-# Modelo: DetalleVenta (Ítems dentro de una Venta)
+# Modelo: DetalleVenta (Sin cambios)
 # =========================================================
 class DetalleVenta(models.Model):
-    # --- Relaciones ---
-    # Vincula este detalle a una Venta específica
     venta = models.ForeignKey(
         Venta,
-        on_delete=models.CASCADE, # Si se borra la Venta, se borran sus detalles
-        related_name='detalles' # Cómo acceder a los detalles desde una Venta (venta.detalles.all())
+        on_delete=models.CASCADE, 
+        related_name='detalles' 
     )
-    # Vincula este detalle a un Producto específico
     producto = models.ForeignKey(
         Producto,
-        on_delete=models.PROTECT, # NO permite borrar un Producto si está en una venta (importante para historial)
+        on_delete=models.PROTECT, 
         related_name='detalles_venta'
     )
-
-    # --- Información del Ítem ---
     cantidad = models.PositiveIntegerField(default=1)
     precio_unitario = models.DecimalField(max_digits=10, decimal_places=2, help_text="Precio del producto al momento de la venta")
     subtotal = models.DecimalField(max_digits=12, decimal_places=2)
 
     def save(self, *args, **kwargs):
-        # Calcula el subtotal automáticamente antes de guardar
         self.subtotal = self.cantidad * self.precio_unitario
         super().save(*args, **kwargs)
 
@@ -89,4 +82,41 @@ class DetalleVenta(models.Model):
     class Meta:
         verbose_name = 'Detalle de Venta'
         verbose_name_plural = 'Detalles de Venta'
-        # unique_together = ('venta', 'producto') # Opcional: Evita añadir el mismo producto dos veces en la misma venta
+        
+class Garantia(models.Model):
+    """
+    Registra una garantía única para una UNIDAD de un producto vendido.
+    Si un DetalleVenta tiene cantidad=5, se crearán 5 de estos objetos.
+    """
+    class EstadoGarantia(models.TextChoices):
+        ACTIVA = 'ACT', 'Activa'
+        EXPIRADA = 'EXP', 'Expirada'
+        RECLAMADA = 'REC', 'Reclamada' # Se usó la garantía
+
+    # Vincula a la línea de pedido específica
+    detalle_venta = models.ForeignKey(
+        DetalleVenta,
+        on_delete=models.CASCADE,
+        related_name='garantias' # Permite detalle.garantias.all()
+    )
+    # Código único para que el cliente consulte (CU17)
+    codigo_garantia = models.UUIDField(
+        default=uuid.uuid4,
+        editable=False,
+        unique=True,
+        db_index=True
+    )
+    fecha_vencimiento = models.DateField()
+    estado = models.CharField(
+        max_length=3,
+        choices=EstadoGarantia.choices,
+        default=EstadoGarantia.ACTIVA
+    )
+    
+    def __str__(self):
+        return f"Garantía {str(self.codigo_garantia)[:8]}... (Vence: {self.fecha_vencimiento})"
+    
+    class Meta:
+        verbose_name = 'Garantía de Producto'
+        verbose_name_plural = 'Garantías de Producto'
+        ordering = ['-fecha_vencimiento']

@@ -27,8 +27,12 @@ SECRET_KEY = env_config('SECRET_KEY') # Lee desde .env
 DEBUG = env_config('DEBUG', default=False, cast=bool)
 # -------------------------
 
-ALLOWED_HOSTS_STRING = env_config('DJANGO_ALLOWED_HOSTS', default='127.0.0.1,localhost') # Lee desde .env
+ALLOWED_HOSTS_STRING = env_config(
+    'DJANGO_ALLOWED_HOSTS',
+    default='127.0.0.1,localhost,192.168.100.148'
+)
 ALLOWED_HOSTS = [host.strip() for host in ALLOWED_HOSTS_STRING.split(',') if host.strip()]
+
 
 # Application definition
 INSTALLED_APPS = [
@@ -45,6 +49,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'ventas',
     'reportes',
+    'analitica',
 ]
 
 MIDDLEWARE = [
