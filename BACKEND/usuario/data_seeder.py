@@ -85,11 +85,11 @@ def seed_ventas_ia(cantidad_a_crear=365):
                     productos_usados.add(producto_aleatorio.id)
                     
                     # 5. Actualizar Stock
-                    producto_aleatorio.stock -= cantidad_comprada
-                    producto_aleatorio.save(update_fields=['stock']) 
+                    # (Comentado para que no afecte tu inventario real en Render)
+                    # producto_aleatorio.stock -= cantidad_comprada
+                    # producto_aleatorio.save(update_fields=['stock']) 
                 
                 except Exception as detail_error:
-                    # Captura errores internos del detalle (raro, pero seguro)
                     print(f"Error interno en detalle de venta para venta #{venta.id}: {detail_error}")
                     continue 
                     

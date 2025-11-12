@@ -23,15 +23,7 @@ from .data_seeder import seed_ventas_ia
 from firebase_admin.messaging import Message, Notification
 from fcm_django.models import FCMDevice
 
-import random
-from datetime import timedelta
-from decimal import Decimal
-from django.utils import timezone
-from django.db import transaction
 
-# Importamos modelos necesarios
-from usuario.models import Producto, Cliente, Usuario, Rol
-from ventas.models import Venta, DetalleVenta
 
 
 # Vista para permitir el registro de nuevos usuarios (por defecto, Clientes)
@@ -696,100 +688,39 @@ def register_fcm_device(request):
     return Response({"success": "Dispositivo registrado/actualizado"})
 
 
-
-def seed_ventas_ia(cantidad_a_crear=365):
+class InitializeIADataView(APIView):
     """
-    Genera ventas sintéticas con DetalleVenta para IA (últimos 2 años).
-    NOTA: Esto DEBE correr en un ambiente con Productos y Clientes ya existentes.
+    🔴 VISTA TEMPORAL para generar datos de venta masivos en producción (Render).
+    DEBE SER ELIMINADA TRAS SU USO.
     """
+    permission_classes = [IsAdminUser] # Solo Admins pueden ejecutar esto
     
-    # 1. Obtener recursos necesarios (Productos, Clientes, Vendedores)
-    productos = list(Producto.objects.filter(stock__gt=0))
-    # --- ¡CORRECCIÓN DE MODELO! ---
-    # Usamos el modelo 'Cliente', no 'Usuario con rol Cliente'
-    clientes = list(Cliente.objects.all())
-    vendedores = list(Usuario.objects.filter(rol=Rol.VENDEDOR))
-
-    # --- CORRECCIÓN DE VERIFICACIÓN ---
-    if not productos:
-        raise Exception("Faltan recursos: ¡No hay PRODUCTOS con stock en la base de datos! Carga el excel primero.")
-    if not clientes:
-        raise Exception("Faltan recursos: ¡No hay CLIENTES en la base de datos! Crea un usuario cliente primero.")
-    
-    print(f"Usando {len(productos)} productos y {len(clientes)} clientes.")
-    
-    created_count = 0
-    now = timezone.now()
-
-    with transaction.atomic():
-        
-        # Paso de Limpieza CRUCIAL
-        Venta.objects.filter(estado=Venta.EstadoVenta.ENTREGADO).delete()
-        
-        for i in range(cantidad_a_crear):
-            try:
-                # 2. Seleccionar Cliente y Vendedor aleatorio
-                cliente_aleatorio = random.choice(clientes)
-                vendedor_aleatorio = random.choice(vendedores) if vendedores else None 
-
-                # Simular fechas aleatorias en los últimos 2 años (730 días)
-                dias_atras = random.randint(1, 730)
-                fecha_venta_simulada = now - timedelta(days=dias_atras)
-                
-                # 3. Crear la cabecera de la Venta
-                venta = Venta.objects.create(
-                    cliente=cliente_aleatorio,
-                    vendedor=vendedor_aleatorio,
-                    # --- ¡CORRECCIÓN DE ESTADO! ---
-                    estado=Venta.EstadoVenta.ENTREGADO, 
-                    total=Decimal('0.00') 
-                )
-                
-                # Forzar la fecha
-                venta.fecha_venta = fecha_venta_simulada
-                venta.save(update_fields=['fecha_venta'])
-
-                # 4. Crear Detalles de Venta (1 a 5 productos por venta)
-                num_items = random.randint(1, 5)
-                venta_total_calculado = Decimal('0.00')
-                productos_usados = set() 
-
-                for _ in range(num_items):
-                    producto_aleatorio = random.choice(productos)
-                    if producto_aleatorio.id in productos_usados:
-                        continue 
-                        
-                    cantidad_comprada = random.randint(1, 3) 
-                    
-                    if producto_aleatorio.stock < cantidad_comprada:
-                        continue 
-
-                    precio_en_venta = producto_aleatorio.precio 
-                    
-                    detalle = DetalleVenta.objects.create(
-                        venta=venta,
-                        producto=producto_aleatorio,
-                        cantidad=cantidad_comprada,
-                        precio_unitario=precio_en_venta
-                    )
-                    
-                    venta_total_calculado += detalle.subtotal
-                    productos_usados.add(producto_aleatorio.id)
-                    
-                    # 5. Actualizar Stock
-                    # Comenta estas dos líneas si NO quieres que el seeder afecte tu inventario real
-                    producto_aleatorio.stock -= cantidad_comprada
-                    producto_aleatorio.save(update_fields=['stock']) 
-                
-                # 6. Actualizar el Total de la Venta
-                if venta_total_calculado > 0:
-                    venta.total = venta_total_calculado
-                    venta.save(update_fields=['total'])
-                    created_count += 1
-                else:
-                    venta.delete()
+    def post(self, request):
+        try:
+            cantidad = int(request.data.get('cantidad', 365))
+            if cantidad > 5000:
+                 return Response({"error": "Límite de 5000 ventas para evitar sobrecarga."}, status=status.HTTP_400_BAD_REQUEST)
             
-            except Exception as e:
-                print(f'Error creando venta {i}: {e}')
-                    
-    return created_count
+            # --- VALIDACIÓN CRUCIAL DE RECURSOS ---
+            if not Producto.objects.filter(stock__gt=0).exists() or not Cliente.objects.exists():
+                 # --- ¡ERROR DE TIPEO CORREGIDO! ---
+                 return Response({"error": "Fallo de Recursos: Asegúrate de cargar Productos y Clientes primero."}, status=status.HTTP_400_BAD_REQUEST)
+
+            # --- LLAMADA A LA LÓGICA DEL SEEDER ---
+            created_count = seed_ventas_ia(cantidad)
+            
+            # Forzamos el entrenamiento del modelo después de crear datos
+            try:
+                 from analitica.ml_service import train_sales_model
+                 train_sales_model()
+            except ImportError:
+                 return Response({
+                    "success": f"Creadas {created_count} ventas, pero el servicio ML no se encontró. Entrena manualmente."
+                 }, status=status.HTTP_201_CREATED)
+            
+            return Response({
+                "success": f"Proceso completado. Creadas {created_count} ventas históricas. Modelo IA re-entrenado."
+            }, status=status.HTTP_201_CREATED)
+        
+        except Exception as e:
+            return Response({"error": f"Error al inicializar datos: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
