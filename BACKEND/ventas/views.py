@@ -18,14 +18,8 @@ from decimal import Decimal
 from fcm_django.models import FCMDevice
 from firebase_admin.messaging import Message, Notification
 
-from django.core.management import call_command
-from django.http import JsonResponse
 
-from rest_framework.permissions import AllowAny
-from django.db import transaction
-import uuid
-from random import choice
-from usuario.models import Cliente
+
 
 # =========================================================
 # VISTAS DE VENTAS
@@ -408,64 +402,3 @@ class GestionarGarantiaView(APIView):
         
         return Response({"status": f"Garantía actualizada a: {garantia.get_estado_display()}"}, status=status.HTTP_200_OK)
     
-class RunPopulateView(APIView):
-    """
-    Permite poblar la base de datos remotamente con datos falsos.
-    Ejemplo:
-      GET /api/ventas/run-populate/?key=d4c0a8b1-ventas-populate-20253&cantidad=500
-    """
-    permission_classes = [AllowAny]  # 👈 Permitir acceso sin autenticación
-
-    def get(self, request, *args, **kwargs):
-        # 1️⃣ Validar clave secreta
-        key = request.query_params.get("key")
-        expected_key = "d4c0a8b1-ventas-populate-20253"  # Cambia por la tuya
-
-        if key != expected_key:
-            return Response(
-                {"error": "No autorizado. Clave incorrecta."},
-                status=status.HTTP_401_UNAUTHORIZED
-            )
-
-        # 2️⃣ Cantidad de ventas
-        cantidad = int(request.query_params.get("cantidad", 10))
-
-        clientes = list(Cliente.objects.all())
-        productos = list(Producto.objects.all())
-
-        if not clientes or not productos:
-            return Response(
-                {"error": "No hay clientes o productos en la base de datos."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # 3️⃣ Crear datos falsos
-        ventas_creadas = 0
-        with transaction.atomic():
-            for _ in range(cantidad):
-                cliente = choice(clientes)
-                venta = Venta.objects.create(
-                    cliente=cliente,
-                    fecha_venta=timezone.now(),
-                    total=0
-                )
-
-                total = 0
-                for _ in range(3):
-                    prod = choice(productos)
-                    detalle = DetalleVenta.objects.create(
-                        venta=venta,
-                        producto=prod,
-                        cantidad=1,
-                        precio_unitario=prod.precio
-                    )
-                    total += prod.precio
-
-                venta.total = total
-                venta.save()
-                ventas_creadas += 1
-
-        return Response(
-            {"mensaje": f"Se generaron {ventas_creadas} ventas exitosamente."},
-            status=status.HTTP_200_OK
-        )
