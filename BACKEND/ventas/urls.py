@@ -1,7 +1,7 @@
 # ventas/urls.py
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import VentaViewSet, CreatePaymentIntentView, DescargarComprobanteView, ConsultarGarantiaView, IniciarReclamoGarantiaView, GestionarGarantiaView, GarantiaViewSet, RunPopulateView
+from .views import VentaViewSet, CreatePaymentIntentView, DescargarComprobanteView, ConsultarGarantiaView, IniciarReclamoGarantiaView, GestionarGarantiaView, GarantiaViewSet
 
 router = DefaultRouter()
 # Registra el ViewSet. Crea /api/ventas/ y /api/ventas/{pk}/
@@ -17,6 +17,6 @@ urlpatterns = [
     
     # 3. Gestionar Reclamo (Admin)
     path('garantias/<int:garantia_id>/gestionar/', GestionarGarantiaView.as_view(), name='gestionar-reclamo-garantia'),
-    path('run-populate/', RunPopulateView.as_view(), name='populate-ventas'),
+
 
 ]
