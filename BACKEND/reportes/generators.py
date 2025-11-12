@@ -1,11 +1,12 @@
-# reportes/generators.py
 import io
 from django.http import HttpResponse
 from reportlab.lib.pagesizes import letter, landscape
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle  # <-- 1. IMPORTADO ParagraphStyle
+# --- ¡AQUÍ ESTÁ LA CORRECCIÓN! ---
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle 
 from reportlab.lib import colors
-from reportlab.lib.units import inch  # <-- 2. IMPORTADO inch
+from reportlab.lib.units import inch
+# --- FIN DE LA CORRECCIÓN ---
 import openpyxl
 from openpyxl.styles import Font, Alignment
 from decimal import Decimal
@@ -19,13 +20,12 @@ def generar_reporte_pdf(data_para_reporte, interpretacion):
     """
     buffer = io.BytesIO()
     
-    # Usar 'landscape' (horizontal) si hay muchas columnas
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
     story = []
     styles = getSampleStyleSheet()
 
-    # 1. Título (basado en el prompt o interpretación)
-    prompt_usado = interpretacion.get('prompt', 'Reporte Personalizado') # Necesitarías pasar el prompt original
+    # 1. Título
+    prompt_usado = interpretacion.get('prompt', 'Reporte Personalizado')
     titulo = Paragraph(f"Reporte: {prompt_usado}", styles['h1'])
     titulo.style.alignment = 1 # Centrado
     story.append(titulo)
@@ -35,15 +35,12 @@ def generar_reporte_pdf(data_para_reporte, interpretacion):
     if not data_para_reporte:
         story.append(Paragraph("No se encontraron datos.", styles['Normal']))
     else:
-        # Extraer cabeceras (headers) y filas (rows)
         headers = list(data_para_reporte[0].keys())
-        # Formatear cabeceras (ej. 'cliente__nombre' -> 'Cliente')
         formatted_headers = [h.split('__')[-1].replace('_', ' ').capitalize() for h in headers]
         
-        # Convertir todos los datos a string para la tabla
-        rows = [formatted_headers] # Primera fila son las cabeceras
+        rows = [formatted_headers] 
         for item in data_para_reporte:
-            row_data = [str(item.get(h, '')) for h in headers] # Obtener valor y convertir a string
+            row_data = [str(item.get(h, '')) for h in headers]
             rows.append(row_data)
 
         # 3. Crear Tabla y Estilos
@@ -64,7 +61,6 @@ def generar_reporte_pdf(data_para_reporte, interpretacion):
         ])
         table.setStyle(style)
         
-        # Aplicar estilo de fila alterna
         for i, row in enumerate(rows):
             if i % 2 == 0 and i > 0: # Omitir cabecera
                 style.add('BACKGROUND', (0, i), (-1, i), colors.whitesmoke)
@@ -76,7 +72,6 @@ def generar_reporte_pdf(data_para_reporte, interpretacion):
     
     buffer.seek(0)
     response = HttpResponse(buffer, content_type='application/pdf')
-    # Usamos el prompt para un nombre de archivo dinámico
     filename = f"reporte_{prompt_usado.lower().replace(' ', '_')[:30]}.pdf"
     response['Content-Disposition'] = f'attachment; filename="{filename}"'
     return response
@@ -90,7 +85,7 @@ def generar_reporte_excel(data_para_reporte, interpretacion):
     workbook = openpyxl.Workbook()
     sheet = workbook.active
     prompt_usado = interpretacion.get('prompt', 'Reporte')
-    sheet.title = prompt_usado[:30] # Límite de 31 chars para título de hoja
+    sheet.title = prompt_usado[:30] 
 
     if not data_para_reporte:
         sheet.cell(row=1, column=1).value = "No se encontraron datos."
@@ -117,12 +112,11 @@ def generar_reporte_excel(data_para_reporte, interpretacion):
                 value = row_data.get(header_key, None)
                 cell = sheet.cell(row=row_num, column=col_num)
                 
-                # Convertir tipos (Decimal, Datetime) a tipos que Excel entiende
                 if isinstance(value, Decimal):
                     cell.value = float(value)
                     cell.number_format = '#,##0.00'
                 elif isinstance(value, datetime):
-                    cell.value = value.replace(tzinfo=None) # Quitar timezone info
+                    cell.value = value.replace(tzinfo=None) 
                     cell.number_format = 'YYYY-MM-DD HH:MM'
                 elif isinstance(value, date):
                     cell.value = value
@@ -152,9 +146,7 @@ def generar_comprobante_pdf(venta):
     story = []
     styles = getSampleStyleSheet()
 
-    # Estilo para texto normal
     normal_style = styles['Normal']
-    # Estilo para texto en negrita
     bold_style = ParagraphStyle(name='Bold', parent=styles['Normal'], fontName='Helvetica-Bold')
 
     # 1. Título
@@ -174,10 +166,10 @@ def generar_comprobante_pdf(venta):
     if venta.vendedor:
         info_table_data.append([Paragraph('Atendido por:', bold_style), Paragraph(venta.vendedor.username, normal_style)])
     
-    info_table = Table(info_table_data, colWidths=[1.5 * inch, 5.5 * inch]) # Ajustado ancho
+    info_table = Table(info_table_data, colWidths=[1.5 * inch, 5.5 * inch]) 
     info_table.setStyle(TableStyle([
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey), # Quita o pon bordes
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey), 
         ('BOX', (0, 0), (-1, -1), 0.5, colors.grey),
     ]))
     story.append(info_table)
@@ -187,33 +179,29 @@ def generar_comprobante_pdf(venta):
     story.append(Paragraph("Detalles de la Compra:", styles['h3']))
     
     detalles_data = [
-        # Cabeceras de la tabla
         [Paragraph('Producto', bold_style), Paragraph('Cant.', bold_style), Paragraph('P. Unit.', bold_style), Paragraph('Subtotal', bold_style)]
     ]
     
-    # --- 3. OPTIMIZACIÓN (N+1 Query) ---
-    # Usamos select_related('producto') para evitar una consulta por cada item
+    # (Tu optimización N+1 ya estaba aquí y es correcta)
     detalles = venta.detalles.select_related('producto').all()
-    # --- FIN OPTIMIZACIÓN ---
     
     if not detalles:
          detalles_data.append(["No se encontraron detalles", "", "", ""])
     else:
         for detalle in detalles:
             detalles_data.append([
-                Paragraph(detalle.producto.nombre, normal_style), # Nombre del producto
+                Paragraph(detalle.producto.nombre, normal_style),
                 Paragraph(str(detalle.cantidad), normal_style),
                 Paragraph(f"Bs {detalle.precio_unitario:.2f}", normal_style),
                 Paragraph(f"Bs {detalle.subtotal:.2f}", normal_style)
             ])
 
-    # Estilo de la tabla de detalles
-    detalles_table = Table(detalles_data, colWidths=[3.5 * inch, 0.5 * inch, 1.5 * inch, 1.5 * inch]) # Ajustado ancho
+    detalles_table = Table(detalles_data, colWidths=[3.5 * inch, 0.5 * inch, 1.5 * inch, 1.5 * inch])
     detalles_table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#4A90E2")),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('ALIGN', (1, 0), (-1, -1), 'RIGHT'), # Alinear números a la derecha
+        ('ALIGN', (1, 0), (-1, -1), 'RIGHT'), 
         ('GRID', (0, 0), (-1, -1), 1, colors.black),
         ('BOX', (0, 0), (-1, -1), 1, colors.black),
     ]))
@@ -232,11 +220,9 @@ def generar_comprobante_pdf(venta):
     ]))
     story.append(total_table)
 
-    # Construir PDF
     doc.build(story)
     buffer.seek(0)
     
-    # Devolver la respuesta HTTP
     response = HttpResponse(buffer, content_type='application/pdf')
     response['Content-Disposition'] = f'attachment; filename="comprobante_venta_{venta.id}.pdf"'
     return response

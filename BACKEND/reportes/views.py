@@ -1,4 +1,3 @@
-# reportes/views.py
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, permissions
@@ -15,7 +14,7 @@ from django.db import models
 from django.db.models import Sum, Count, Q, F
 from django.core.exceptions import FieldDoesNotExist, ValidationError
 from django.db.models.fields.related import RelatedField
-from django.utils import timezone # Para obtener fecha actual
+from django.utils import timezone 
 
 # --- Imports de tus apps ---
 from usuario.permissions import IsAdminOrVendedor
@@ -46,7 +45,7 @@ if settings.GEMINI_API_KEY:
 else:
     print("[WARN] GEMINI_API_KEY no encontrada. Reportes con IA deshabilitados.")
 
-GEMINI_MODEL_NAME = 'models/gemini-2.5-pro' 
+GEMINI_MODEL_NAME = 'gemini-2.5-flash-preview-09-2025'
 DJANGO_LOOKUP_OPERATORS = ['exact','iexact','contains','icontains','in','gt','gte','lt','lte','isnull','range','year','month','day','week_day','startswith','istartswith','endswith','iendswith']
 ALLOWED_AGGREGATIONS = {'Sum': Sum, 'Count': Count}
 
@@ -57,27 +56,77 @@ ALLOWED_AGGREGATIONS = {'Sum': Sum, 'Count': Count}
 class GenerarReporteView(APIView):
     permission_classes = [IsAdminOrVendedor]
 
-    # --- (Función _call_gemini_api: Pega tu función corregida aquí) ---
+    # --- (Función _call_gemini_api: CORREGIDA Y BLINDADA) ---
     def _call_gemini_api(self, user_prompt):
         if not GEMINI_CONFIGURED:
             return {"error": "Servicio de IA no configurado en el servidor."}
         now = timezone.now()
         current_date_str = now.strftime('%Y-%m-%d')
         current_year_str = now.strftime('%Y')
-        schema_definition = """
-Esquema de Modelos y Relaciones (Usa estos campos y `related_names`):
-- Venta: id, cliente (-> Cliente, related_name='ventas'), vendedor (-> Usuario, related_name='ventas_registradas'), fecha_venta (DateTimeField), total (DecimalField), estado (PEN, COM, CAN).
-- DetalleVenta: id, venta (-> Venta, related_name='detalles'), producto (-> Producto, related_name='detalles_venta'), cantidad (IntegerField), precio_unitario (DecimalField), subtotal (DecimalField).
-- Producto: id, nombre, marca, modelo, categoria (-> Categoria, related_name='productos'), precio (DecimalField), stock (IntegerField), garantia_meses (IntegerField).
-- Cliente: id, user (-> Usuario, related_name='cliente_profile'), nombre, apellido, email, telefono, direccion, nit_ci.
-- Categoria: id, nombre (StringField), descripcion (TextField).
+        
+        # --- ¡INICIO DE LA CORRECCIÓN! ---
+        # Este esquema ahora coincide 100% con tus models.py
+        schema_definition = f"""
+Esquema de Modelos y Relaciones (Campos y related_names EXACTOS):
 
-Regla de Filtrado de Categoría: Para filtrar productos por categoría (ej: "lavado"), usa el campo 'nombre' de la categoría: 'categoria__nombre__icontains': 'lavado'.
+1. Venta (tipo_reporte='ventas'):
+   - id (IntegerField)
+   - cliente (ForeignKey -> Cliente, related_name='ventas')
+   - vendedor (ForeignKey -> Usuario, related_name='ventas_registradas')
+   - fecha_venta (DateTimeField)
+   - total (DecimalField)
+   - estado (StringField, Choices: 'PAG', 'ENT', 'OK', 'CAN')
+     - 'PAG' = Pagado
+     - 'ENT' = En Tránsito
+     - 'OK' = Entregado (Venta completada)
+     - 'CAN' = Cancelado
+   - (related_name para join INVERSO: 'detalles' -> DetalleVenta)
 
---- ¡NUEVAS REGLAS! ---
-Regla de Agrupación por Relación: Cuando agrupes por 'cliente', 'producto' o 'vendedor', DEBES usar sus campos de texto (ej: 'cliente__nombre', 'producto__nombre', 'vendedor__username'), NUNCA sus IDs.
-Regla de Agregación: Si el usuario pide "total de", "cantidad de", "conteo de", o "promedio de", DEBES añadir un cálculo en la sección "calculos".
---- FIN NUEVAS REGLAS ---
+2. DetalleVenta (Usado para joins, no es un tipo de reporte directo):
+   - id (IntegerField)
+   - venta (ForeignKey -> Venta, related_name='detalles')
+   - producto (ForeignKey -> Producto, related_name='detalles_venta')
+   - cantidad (PositiveIntegerField)
+   - precio_unitario (DecimalField)
+   - subtotal (DecimalField)
+
+3. Producto (tipo_reporte='productos'):
+   - id (IntegerField)
+   - nombre (CharField)
+   - marca (CharField)
+   - modelo (CharField)
+   - categoria (ForeignKey -> Categoria, related_name='productos')
+   - precio (DecimalField)
+   - stock (IntegerField)
+   - garantia_meses (IntegerField)
+   - calificacion_promedio (DecimalField)
+   - total_resenas (PositiveIntegerField)
+   - (related_name para join INVERSO: 'detalles_venta' -> DetalleVenta)
+
+4. Cliente (tipo_reporte='clientes'):
+   - id (IntegerField)
+   - user (OneToOneField -> Usuario, related_name='cliente_profile')
+   - nombre (CharField)
+   - apellido (CharField)
+   - email (EmailField)
+   - telefono (CharField)
+   - direccion (TextField)
+   - nit_ci (CharField)
+   - (related_name para join INVERSO: 'ventas' -> Venta)
+
+5. Categoria (Usado para joins):
+   - id (IntegerField)
+   - nombre (CharField)
+   - descripcion (TextField)
+   - (related_name para join INVERSO: 'productos' -> Producto)
+
+6. Usuario (Usado para joins):
+   - id (IntegerField)
+   - username (CharField)
+   - email (EmailField)
+   - rol (StringField, Choices: 'ADM', 'VEN', 'CLI')
+   - (related_name para join INVERSO: 'ventas_registradas' -> Venta)
+   - (related_name para join INVERSO: 'cliente_profile' -> Cliente)
 """
         system_instruction = f"""
 Eres un asistente experto en bases de datos para SmartSales365, un sistema de ventas de electrodomésticos en Bolivia (Moneda: BOB). Fecha actual: {current_date_str}.
@@ -92,14 +141,26 @@ Tu única tarea es analizar la SOLICITUD DEL USUARIO y DEVOLVER **ÚNICAMENTE** 
   "error": null | "string"
 }}
 {schema_definition}
-Reglas Clave:
-- IGNORA cualquier solicitud de 'formato' (pdf, excel) en el prompt del usuario. SIEMPRE pon "formato": "pantalla".
-- Año por Defecto: Si no se especifica año en fechas (ej: 'septiembre'), usa {current_year_str}.
-- Fechas: SIEMPRE formato 'YYYY-MM-DD'.
-- Texto: Usa 'icontains' por defecto si no se pide exactitud.
-- Errores: Si es ambiguo o inválido, pon descripción en "error".
-- Salida: SOLO el JSON.
+
+REGLAS ESTRICTAS DE ORO:
+1.  **Formato:** IGNORA cualquier solicitud de 'formato' (pdf, excel). SIEMPRE pon "formato": "pantalla".
+2.  **Fechas:** SIEMPRE formato 'YYYY-MM-DD'. Si no se especifica año (ej: 'septiembre'), usa el año actual {current_year_str}.
+3.  **Texto:** Usa 'icontains' por defecto para búsquedas de texto (nombre, marca, etc.).
+4.  **Relaciones (IMPORTANTE):**
+    -   Para 'tipo_reporte: "ventas"': Filtra productos usando `detalles__producto__nombre`.
+    -   Para 'tipo_reporte: "productos"': Filtra ventas usando `detalles_venta__venta__estado`.
+    -   Para 'tipo_reporte: "clientes"': Filtra ventas usando `ventas__fecha_venta`.
+    -   Filtro de Categoría: Para filtrar productos por nombre de categoría, SIEMPRE usa `categoria__nombre__icontains`.
+5.  **Agrupación:** Si agrupas por una relación (cliente, producto), DEBES usar el campo de texto (ej: 'cliente__nombre', 'producto__nombre'), NUNCA el ID.
+6.  **Cálculos (¡OBLIGATORIO!):** Si pides "total", "suma", "conteo", "cantidad", DEBES usar la sección "calculos". Formato SIEMPRE como DICT:
+    -   "total de ventas" -> "calculos": {{"total_ventas": {{"funcion": "Sum", "campo": "total"}}}}
+    -   "cantidad de productos" -> "calculos": {{"cantidad_productos": {{"funcion": "Count", "campo": "id"}}}}
+    -   "total vendido del producto" (en reporte de productos) -> "calculos": {{"total_vendido": {{"funcion": "Sum", "campo": "detalles_venta__subtotal"}}}}
+7.  **Errores:** Si es ambiguo o inválido, pon descripción en "error".
+8.  **Salida:** SOLO el JSON.
 """
+        # --- FIN DE LA CORRECCIÓN ---
+        
         try:
             print(f"\n[Gemini] Using model: {GEMINI_MODEL_NAME}")
             print(f"[Gemini] Sending prompt:\nUser Prompt: {user_prompt}")
@@ -146,7 +207,7 @@ Reglas Clave:
             traceback.print_exc()
             return {"error": error_msg}
 
-    # --- (Función _parse_date_value: Pega tu función aquí) ---
+    # --- (Función _parse_date_value: Sin cambios) ---
     def _parse_date_value(self, value):
         if value is None: return None
         if dateutil_parse and isinstance(value, str):
@@ -157,7 +218,7 @@ Reglas Clave:
             except ValueError: return datetime.strptime(value, '%Y-%m-%d %H:%M:%S')
         return value
 
-    # --- (Función _validate_and_convert_value: Pega tu función aquí) ---
+    # --- (Función _validate_and_convert_value: Sin cambios) ---
     def _validate_and_convert_value(self, model_class, lookup, value):
         current_model = model_class
         field_instance = None
@@ -211,33 +272,51 @@ Reglas Clave:
                     else: converted_value = bool(value)
                 elif target_type == models.CharField and not isinstance(value, str):
                     converted_value = str(value)
-            elif parts[-1] in ['year', 'month', 'day', 'week_day']:
-                converted_value = int(value)
+                elif parts[-1] in ['year', 'month', 'day', 'week_day']:
+                    converted_value = int(value)
             return converted_value
         except FieldDoesNotExist as e: raise FieldDoesNotExist(f"Campo/relación inválido en '{lookup}': {e}")
         except (ValueError, TypeError) as e: raise ValueError(f"Valor '{value}' inválido para filtro '{lookup}': {e}")
 
-    # --- (Función _build_queryset: Pega tu función corregida aquí) ---
+    # --- (Función _build_queryset: Sin cambios, tu lógica es robusta) ---
     def _build_queryset(self, interpretacion):
         tipo = interpretacion.get("tipo_reporte")
         filtros_dict = interpretacion.get("filtros", {})
         agrupacion_list = interpretacion.get("agrupacion", [])
         calculos_dict = interpretacion.get("calculos", {})
         orden_list = interpretacion.get("orden", [])
+        
         ModelClass = None
         base_queryset = None
-        related_name_producto_a_detalle = 'detalles_venta'
-        related_name_venta_a_detalle = 'detalles'
-        if tipo == "ventas": ModelClass = Venta; base_queryset = Venta.objects.select_related('cliente', 'vendedor').prefetch_related(f'{related_name_venta_a_detalle}__producto')
-        elif tipo == "productos": ModelClass = Producto; base_queryset = Producto.objects.select_related('categoria').all()
-        elif tipo == "clientes": ModelClass = Cliente; base_queryset = Cliente.objects.select_related('user')
-        else: raise ValueError(f"Tipo de reporte '{tipo}' no soportado.")
+        
+        # Nombres de relaciones (¡deben coincidir con el prompt!)
+        related_name_producto_a_detalle = 'detalles_venta' # Producto.detalles_venta
+        related_name_venta_a_detalle = 'detalles'        # Venta.detalles
+        related_name_cliente_a_venta = 'ventas'          # Cliente.ventas
+
+        if tipo == "ventas": 
+            ModelClass = Venta
+            base_queryset = Venta.objects.select_related('cliente', 'vendedor').prefetch_related(f'{related_name_venta_a_detalle}__producto')
+        elif tipo == "productos": 
+            ModelClass = Producto
+            base_queryset = Producto.objects.select_related('categoria').all()
+        elif tipo == "clientes": 
+            ModelClass = Cliente
+            base_queryset = Cliente.objects.select_related('user')
+        else: 
+            raise ValueError(f"Tipo de reporte '{tipo}' no soportado.")
+        
+        # Tu hack de 'filtros_corregidos' es una buena defensa. Lo mantenemos.
         if tipo == "productos":
             filtros_corregidos = {}
             for k, v in filtros_dict.items():
-                if k.startswith(f'{related_name_venta_a_detalle}__'): nuevo_k = k.replace(f'{related_name_venta_a_detalle}__', f'{related_name_producto_a_detalle}__', 1); filtros_corregidos[nuevo_k] = v
-                else: filtros_corregidos[k] = v
+                if k.startswith(f'{related_name_venta_a_detalle}__'): 
+                    nuevo_k = k.replace(f'{related_name_venta_a_detalle}__', f'{related_name_producto_a_detalle}__', 1); 
+                    filtros_corregidos[nuevo_k] = v
+                else: 
+                    filtros_corregidos[k] = v
             filtros_dict = filtros_corregidos
+            
         q_filtros = Q()
         for lookup, value in filtros_dict.items():
             try:
@@ -246,12 +325,17 @@ Reglas Clave:
             except (FieldDoesNotExist, ValueError, TypeError) as e:
                 print(f"[WARN] Skipping invalid filter from LLM: {lookup}={repr(value)}. Reason: {e}")
                 continue
+                
         queryset = base_queryset.filter(q_filtros)
+        
         needs_distinct = False
         if tipo == "productos" and any(k.startswith(f'{related_name_producto_a_detalle}__') for k in filtros_dict): needs_distinct = True
-        elif tipo == "clientes" and any(k.startswith('ventas__') for k in filtros_dict): needs_distinct = True
+        elif tipo == "clientes" and any(k.startswith(f'{related_name_cliente_a_venta}__') for k in filtros_dict): needs_distinct = True
         elif tipo == "ventas" and any(k.startswith(f'{related_name_venta_a_detalle}__') for k in filtros_dict): needs_distinct = True
-        if needs_distinct: queryset = queryset.distinct()
+        
+        if needs_distinct: 
+            queryset = queryset.distinct()
+            
         hubo_agrupacion = False
         valid_agrupacion = []
         if agrupacion_list:
@@ -260,23 +344,22 @@ Reglas Clave:
                 try: self._validate_and_convert_value(ModelClass, field_path, None); valid_agrupacion.append(field_path)
                 except (FieldDoesNotExist, ValueError): print(f"[WARN] Invalid grouping field skipped: {field_path}")
             if not valid_agrupacion: raise ValueError("Ningún campo de agrupación válido.")
+            
             queryset = queryset.values(*valid_agrupacion)
             
-            # --- ¡INICIO DE LA CORRECCIÓN! ---
+            # Tu lógica de 'calculos_dict' (que maneja str y dict) es robusta. La mantenemos.
             if calculos_dict:
                 print(f"[DB Build] Applying calculations: {calculos_dict}")
                 aggregations = {}
-                for name, expr in calculos_dict.items(): # Renombrado a 'expr'
+                for name, expr in calculos_dict.items(): 
                     agg_func_name = None
                     field_in_agg_raw = None
 
-                    # Caso 1: Formato String (ej: "Sum('total')")
                     if isinstance(expr, str):
                         parts = expr.replace(")", "").split("(")
                         if len(parts) == 2:
                             agg_func_name, field_in_agg_raw = parts
                     
-                    # Caso 2: Formato Dict (ej: {"funcion": "Sum", "campo": "total"})
                     elif isinstance(expr, dict):
                         agg_func_name = expr.get("funcion")
                         field_in_agg_raw = expr.get("campo")
@@ -285,7 +368,6 @@ Reglas Clave:
                         print(f"[WARN] Valor de cálculo desconocido: {expr}")
                         continue
                     
-                    # --- Continuación de la lógica (ahora funciona con ambos formatos) ---
                     if agg_func_name and field_in_agg_raw:
                         field_in_agg = field_in_agg_raw.strip("'\" ")
                         if agg_func_name in ALLOWED_AGGREGATIONS and field_in_agg:
@@ -303,9 +385,9 @@ Reglas Clave:
                 if aggregations:
                     print(f"[DB Build] Annotating with: {aggregations}")
                     queryset = queryset.annotate(**aggregations)
-            # --- FIN DE LA CORRECCIÓN! ---
             
             if not orden_list: orden_list = valid_agrupacion
+            
         final_orden_fields = []
         if orden_list:
             for field_order in orden_list:
@@ -313,21 +395,26 @@ Reglas Clave:
                 is_group_field = field_name in valid_agrupacion
                 is_calc_field = field_name in calculos_dict
                 is_model_field = not hubo_agrupacion
+                
                 if is_model_field:
                     try: self._validate_and_convert_value(ModelClass, field_name, None);
                     except (FieldDoesNotExist, ValueError): is_model_field = False
+                        
                 if is_group_field or is_calc_field or is_model_field:
                     final_orden_fields.append(field_order)
                 else:
                     print(f"[WARN] Invalid ordering field skipped: {field_order}")
+                    
         if final_orden_fields:
             queryset = queryset.order_by(*final_orden_fields)
         elif not hubo_agrupacion: 
             if tipo == "ventas": queryset = queryset.order_by('-fecha_venta')
             elif tipo == "productos": queryset = queryset.order_by('nombre')
             elif tipo == "clientes": queryset = queryset.order_by('apellido', 'nombre')
+            
         return queryset, hubo_agrupacion
         
+    # --- (Función post: Sin cambios) ---
     def post(self, request, *args, **kwargs):
         prompt = request.data.get('prompt')
         if not prompt: return Response({"error": "Prompt requerido."}, status=status.HTTP_400_BAD_REQUEST)
@@ -336,7 +423,6 @@ Reglas Clave:
         interpretacion = self._call_gemini_api(prompt)
         if interpretacion.get("error"): return Response({"error": interpretacion["error"]}, status=status.HTTP_400_BAD_REQUEST)
         
-        # Guardamos el prompt para el exportador
         interpretacion['prompt'] = prompt
 
         # 2. Construir Queryset
@@ -370,6 +456,7 @@ Reglas Clave:
                 if ModelClass:
                     valid_fields = [f for f in fields_to_select if '__' in f or hasattr(ModelClass, f.split('__')[0])]
                     data_para_reporte = list(queryset.values(*valid_fields))
+                    # Tu hack para 'categoria__nombre' es bueno, lo mantenemos.
                     if tipo_reporte == "productos" and data_para_reporte:
                         data_para_reporte = [
                             {**{k: v for k, v in row.items() if k != 'categoria__nombre'}, 
@@ -380,7 +467,7 @@ Reglas Clave:
                     data_para_reporte = list(queryset.values())
             
             if not data_para_reporte:
-                return Response([], status=status.HTTP_200_OK) # Devuelve lista vacía
+                return Response([], status=status.HTTP_200_OK)
 
         except Exception as e:
             print(f"[ERROR] Exception during data preparation: {e}")
@@ -400,7 +487,7 @@ Reglas Clave:
 
 
 # ===================================================================
-# --- VISTA #2: ExportarDatosView (NO USA IA, GENERA ARCHIVOS) ---
+# --- VISTA #2: ExportarDatosView (Sin cambios) ---
 # ===================================================================
 class ExportarDatosView(APIView):
     """
@@ -410,18 +497,15 @@ class ExportarDatosView(APIView):
     permission_classes = [IsAdminOrVendedor]
 
     def post(self, request, *args, **kwargs):
-        # 1. Obtener los datos que envía el frontend
-        data = request.data.get('data') # Esta es la lista de diccionarios (el JSON)
-        formato = request.data.get('formato') # 'pdf' o 'excel'
-        prompt = request.data.get('prompt', 'Reporte') # El prompt original para el título
+        data = request.data.get('data') 
+        formato = request.data.get('formato')
+        prompt = request.data.get('prompt', 'Reporte') 
         
         if not data or not isinstance(data, list):
             return Response({"error": "No se proporcionaron datos válidos para exportar."}, status=status.HTTP_400_BAD_REQUEST)
         if not formato in ['pdf', 'excel']:
             return Response({"error": "Formato no válido. Debe ser 'pdf' o 'excel'."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # 2. Crear una 'interpretacion' simple para los generadores
-        # (Los generadores usan esto para el título)
         interpretacion = {
             'prompt': prompt,
             'formato': formato
@@ -429,7 +513,6 @@ class ExportarDatosView(APIView):
 
         print(f"[Export] Solicitud de exportación recibida. Formato: {formato}. Filas: {len(data)}")
 
-        # 3. Llamar al generador correspondiente
         try:
             if formato == "pdf":
                 print("[Export] Llamando a generar_reporte_pdf...")

@@ -46,30 +46,51 @@ def get_sales_predictions(request):
              return Response({"error": "El número de días debe estar entre 1 y 1095."}, status=status.HTTP_400_BAD_REQUEST)
     except ValueError:
         return Response({"error": "El parámetro 'dias' debe ser un número entero."}, status=status.HTTP_400_BAD_REQUEST)
+    
     try:
-        predictions = get_sales_prediction(dias_a_predecir=dias) 
-        if predictions is None:
-            print("[API] Modelo no encontrado, intentando re-entrenamiento...")
+        # --- CAMBIO IMPORTANTE ---
+        # Ahora recibimos 'predictions' y un dict 'metadata'
+        predictions, metadata = get_sales_prediction(dias_a_predecir=dias) 
+        
+        # Comprobamos 'metadata' en lugar de 'predictions'
+        if metadata is None:
+            print("[API] Modelo no encontrado o inválido, intentando re-entrenamiento...")
             training_success = train_sales_model()
+            
             if not training_success:
                  return Response({"error": "No hay suficientes datos para entrenar el modelo."}, status=status.HTTP_404_NOT_FOUND)
-            predictions = get_sales_prediction(dias_a_predecir=dias)
-            if predictions is None:
+            
+            predictions, metadata = get_sales_prediction(dias_a_predecir=dias)
+            
+            if metadata is None:
                  return Response({"error": "Error al cargar modelo post-entrenamiento."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        return Response(predictions, status=status.HTTP_200_OK)
-    except FileNotFoundError:
-         print("[API] FileNotFoundError, intentando entrenar...")
-         training_success = train_sales_model()
-         if not training_success:
-             return Response({"error": "No hay suficientes datos para entrenar el modelo."}, status=status.HTTP_404_NOT_FOUND)
-         predictions = get_sales_prediction(dias_a_predecir=dias)
-         if predictions is None:
-             return Response({"error": "Error al cargar modelo post-entrenamiento."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-         return Response(predictions, status=status.HTTP_200_OK)
+        
+        # --- ¡CAMBIO EN LA RESPUESTA! ---
+        # Añadimos la interpretación estática al dict de metadata
+        # antes de enviarlo todo al frontend.
+        
+        error_promedio = round(metadata.get('rmse', 0), 2)
+        
+        metadata['interpretacion'] = (
+            f"Estos pronósticos tienen un margen de error promedio de +/- {error_promedio} Bs. "
+            "Se basan solo en fechas pasadas (día de la semana, mes) y no consideran "
+            "tendencias de crecimiento, productos específicos o promociones."
+        )
+        
+        # El frontend recibirá un objeto con 'predicciones' y 'metadata'
+        # 'metadata' ahora contiene: rmse, fecha, interpretacion, e insights
+        response_data = {
+            'predicciones': predictions,
+            'metadata': metadata
+        }
+        
+        return Response(response_data, status=status.HTTP_200_OK)
+        # --- FIN DEL CAMBIO ---
+
     except Exception as e:
-        print(f"[ERROR API Predicciones] {e}")
-        traceback.print_exc()
-        return Response({"error": f"Error interno al generar predicciones: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+       print(f"[ERROR API Predicciones] {e}")
+       traceback.print_exc()
+       return Response({"error": f"Error interno al generar predicciones: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 # =========================================================
 # VISTA DE ENTRENAMIENTO (IA)
