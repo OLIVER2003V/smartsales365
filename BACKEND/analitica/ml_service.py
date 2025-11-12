@@ -1,28 +1,22 @@
-import pandas as pd
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_squared_error
 from django.utils import timezone
-import joblib
 import os
 from django.conf import settings
-import numpy as np 
-
 from ventas.models import Venta
+# (Imports pesados eliminados de aquí)
 
 MODEL_PATH = os.path.join(settings.BASE_DIR, 'ml_models', 'sales_model.joblib')
 
-# --- ¡NUEVO! ---
-# Mapas para traducir los números a texto legible
 DAY_MAP = { 0: 'Lunes', 1: 'Martes', 2: 'Miércoles', 3: 'Jueves', 4: 'Viernes', 5: 'Sábado', 6: 'Domingo' }
 MONTH_MAP = { 1: 'Enero', 2: 'Febrero', 3: 'Marzo', 4: 'Abril', 5: 'Mayo', 6: 'Junio', 7: 'Julio', 8: 'Agosto', 9: 'Septiembre', 10: 'Octubre', 11: 'Noviembre', 12: 'Diciembre' }
-# --- FIN NUEVO ---
 
 def prepare_data():
     """
     Extrae datos de la BD de Django y los convierte en un DataFrame de Pandas
     para entrenamiento.
     """
+    # --- Imports diferidos ---
+    import pandas as pd
+    
     print("[ML Service] Extrayendo datos de la base de datos...")
     
     ventas_qs = Venta.objects.filter(estado=Venta.EstadoVenta.ENTREGADO).values(
@@ -61,7 +55,6 @@ def prepare_data():
     df_diario.dropna(inplace=True) 
 
     print("[ML Service] Feature engineering completado.")
-    # Devolvemos df_diario, que tiene todas las columnas
     return df_diario
 
 def train_sales_model():
@@ -69,6 +62,13 @@ def train_sales_model():
     Carga datos, entrena un RandomForestRegressor y guarda el modelo,
     el error (RMSE) Y LOS INSIGHTS (tendencias).
     """
+    # --- Imports diferidos ---
+    from sklearn.ensemble import RandomForestRegressor
+    from sklearn.model_selection import train_test_split
+    from sklearn.metrics import mean_squared_error
+    import joblib
+    import numpy as np 
+    
     df = prepare_data()
     if df is None or df.empty or len(df) < 10: 
         print(f"[ML Service] Abortando entrenamiento: no hay suficientes datos (se encontraron {len(df) if df is not None else 0}).")
@@ -102,44 +102,31 @@ def train_sales_model():
 
     print(f"[ML Service] Entrenamiento completado. RMSE (Error): {rmse:.2f} Bs.")
     
-    # --- ¡NUEVO! EXTRACCIÓN DE INSIGHTS ---
     print("[ML Service] Extrayendo insights y tendencias...")
     
-    # 1. Importancia de Características
     importances = model.feature_importances_
-    # Creamos una lista de tuplas (nombre_feature, importancia) y la ordenamos
     feature_importances = sorted(
         zip(features, importances), 
         key=lambda x: x[1], 
         reverse=True
     )
     
-    # 2. Tendencias de Datos (Usamos el DataFrame 'df' completo)
-    
-    # Tendencia Semanal
     weekly_trend_series = df.groupby('dia_de_la_semana')['total'].mean().sort_index()
     weekly_trend = [
         {'dia': DAY_MAP.get(day_num, day_num), 'promedio_bs': round(avg, 2)}
         for day_num, avg in weekly_trend_series.items()
     ]
-    # Reordenar para que empiece en Lunes y termine en Domingo (opcional pero útil)
     weekly_trend = sorted(weekly_trend, key=lambda x: list(DAY_MAP.values()).index(x['dia']))
 
-    # Tendencia Mensual
     monthly_trend_series = df.groupby('mes')['total'].mean().sort_index()
     monthly_trend = [
         {'mes': MONTH_MAP.get(month_num, month_num), 'promedio_bs': round(avg, 2)}
         for month_num, avg in monthly_trend_series.items()
     ]
-    # Reordenar por mes
     monthly_trend = sorted(monthly_trend, key=lambda x: list(MONTH_MAP.values()).index(x['mes']))
-
-    # --- FIN DE INSIGHTS ---
 
     os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
     
-    # --- CAMBIO IMPORTANTE ---
-    # Guardamos todo en el archivo
     model_data = {
         'model': model,
         'rmse': rmse,
@@ -151,7 +138,6 @@ def train_sales_model():
         }
     }
     joblib.dump(model_data, MODEL_PATH)
-    # --- FIN DEL CAMBIO ---
     
     print(f"[ML Service] Modelo, RMSE e Insights guardados en: {MODEL_PATH}")
     
@@ -162,32 +148,32 @@ def get_sales_prediction(dias_a_predecir=30):
     Carga el modelo guardado y predice.
     Devuelve: (lista_de_predicciones, dict_de_metadatos)
     """
+    # --- Imports diferidos ---
+    import joblib
+    import pandas as pd
+    
     print("[ML Service] Cargando modelo para predicción...")
     try:
         model_data = joblib.load(MODEL_PATH)
         model = model_data['model']
         
-        # --- CAMBIO IMPORTANTE ---
-        # Empaquetamos TODOS los metadatos en un solo diccionario
         metadata = {
             'rmse': model_data.get('rmse'),
             'fecha_entrenamiento': model_data.get('fecha_entrenamiento'),
-            'insights': model_data.get('insights') # Esto contendrá las tendencias
+            'insights': model_data.get('insights') 
         }
-        print(f"[ML Service] Modelo cargado. RMSE: {metadata.get('rmse'):.2f} Bs.")
+        print(f"[ML Service] Modelo cargado. RMSE: {metadata.get('rmse', 0):.2f} Bs.")
         
     except FileNotFoundError:
         print("[ML Service] Error: Archivo del modelo no encontrado.")
         return None, None # (predictions, metadata)
     except KeyError:
-        # Esto pasa si el modelo guardado es antiguo (no tiene 'rmse', 'insights', etc.)
         print("[ML Service] Error: El archivo del modelo es antiguo. Re-entrenando...")
         return None, None # (predictions, metadata)
     except Exception as e:
         print(f"[ML Service] Error desconocido al cargar modelo: {e}")
         return None, None
 
-    # (El resto de la lógica de predicción no cambia)
     base_date = timezone.now()
     future_dates = pd.date_range(start=base_date, periods=dias_a_predecir, freq='D')
     
@@ -209,6 +195,4 @@ def get_sales_prediction(dias_a_predecir=30):
             'prediccion_total_bs': max(0, round(float(future_predictions[i]), 2))
         })
         
-    # --- CAMBIO IMPORTANTE ---
-    # Devolvemos las predicciones y el paquete completo de metadatos
     return results, metadata
