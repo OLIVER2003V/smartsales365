@@ -688,39 +688,4 @@ def register_fcm_device(request):
     return Response({"success": "Dispositivo registrado/actualizado"})
 
 
-class InitializeIADataView(APIView):
-    """
-    🔴 VISTA TEMPORAL para generar datos de venta masivos en producción (Render).
-    DEBE SER ELIMINADA TRAS SU USO.
-    """
-    permission_classes = [IsAdminUser] # Solo Admins pueden ejecutar esto
-    
-    def post(self, request):
-        try:
-            cantidad = int(request.data.get('cantidad', 365))
-            if cantidad > 5000:
-                 return Response({"error": "Límite de 5000 ventas para evitar sobrecarga."}, status=status.HTTP_400_BAD_REQUEST)
-            
-            # --- VALIDACIÓN CRUCIAL DE RECURSOS ---
-            if not Producto.objects.filter(stock__gt=0).exists() or not Cliente.objects.exists():
-                 # --- ¡ERROR DE TIPEO CORREGIDO! ---
-                 return Response({"error": "Fallo de Recursos: Asegúrate de cargar Productos y Clientes primero."}, status=status.HTTP_400_BAD_REQUEST)
 
-            # --- LLAMADA A LA LÓGICA DEL SEEDER ---
-            created_count = seed_ventas_ia(cantidad)
-            
-            # Forzamos el entrenamiento del modelo después de crear datos
-            try:
-                 from analitica.ml_service import train_sales_model
-                 train_sales_model()
-            except ImportError:
-                 return Response({
-                    "success": f"Creadas {created_count} ventas, pero el servicio ML no se encontró. Entrena manualmente."
-                 }, status=status.HTTP_201_CREATED)
-            
-            return Response({
-                "success": f"Proceso completado. Creadas {created_count} ventas históricas. Modelo IA re-entrenado."
-            }, status=status.HTTP_201_CREATED)
-        
-        except Exception as e:
-            return Response({"error": f"Error al inicializar datos: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

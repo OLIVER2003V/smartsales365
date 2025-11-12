@@ -11,19 +11,35 @@ from ventas.models import Venta, DetalleVenta
 def seed_ventas_ia(cantidad_a_crear=365):
     """
     Genera ventas sintéticas con DetalleVenta para IA (últimos 2 años).
-    Solo requiere Productos y Clientes.
+    Usa TODOS los usuarios con Rol 'Cliente' y crea sus perfiles si no existen.
     """
     
-    # 1. Obtener recursos necesarios (Ya no buscamos Vendedores)
+    # 1. Obtener recursos necesarios
     productos = list(Producto.objects.filter(stock__gt=0))
-    clientes = list(Cliente.objects.all())
-
-    # --- VERIFICACIÓN SIMPLIFICADA ---
+    usuarios_clientes = list(Usuario.objects.filter(rol=Rol.CLIENTE))
+    
+    if not usuarios_clientes:
+         raise Exception("Faltan recursos: ¡No hay USUARIOS con rol CLIENTE en la base de datos!")
     if not productos:
-        raise Exception("Faltan recursos: ¡No hay PRODUCTOS con stock en la base de datos! Carga el excel primero.")
-    if not clientes:
-        raise Exception("Faltan recursos: ¡No hay CLIENTES en la base de datos! Crea un usuario cliente.")
-    # --- FIN DE VERIFICACIÓN ---
+         raise Exception("Faltan recursos: ¡No hay PRODUCTOS con stock en la base de datos! Carga el excel primero.")
+    
+    # 2. Convertimos esos USUARIOS en perfiles de CLIENTE
+    clientes_reales = []
+    for user in usuarios_clientes:
+        cliente_profile, created = Cliente.objects.get_or_create(
+            user=user,
+            defaults={
+                'nombre': user.first_name or user.username,
+                'apellido': user.last_name or '',
+                'email': user.email,
+            }
+        )
+        clientes_reales.append(cliente_profile)
+    
+    if not clientes_reales:
+         raise Exception("No se pudieron encontrar o crear perfiles de Cliente a partir de los Usuarios.")
+    
+    print(f"Usando {len(productos)} productos y {len(clientes_reales)} perfiles de cliente.")
     
     created_count = 0
     now = timezone.now()
@@ -34,35 +50,29 @@ def seed_ventas_ia(cantidad_a_crear=365):
         Venta.objects.filter(estado=Venta.EstadoVenta.ENTREGADO).delete()
         
         for i in range(cantidad_a_crear):
-            
-            # 2. Seleccionar Cliente aleatorio
-            cliente_aleatorio = random.choice(clientes)
-            # Vendedor_aleatorio es implícitamente None
+            try:
+                cliente_aleatorio = random.choice(clientes_reales)
+                vendedor_aleatorio = None # No usas vendedores
 
-            # Simular fechas aleatorias en los últimos 2 años (730 días)
-            dias_atras = random.randint(1, 730)
-            fecha_venta_simulada = now - timedelta(days=dias_atras)
-            
-            # 3. Crear la cabecera de la Venta
-            venta = Venta.objects.create(
-                cliente=cliente_aleatorio,
-                vendedor=None, # <-- Forzamos a NONE, ya que no existe un vendedor.
-                estado=Venta.EstadoVenta.ENTREGADO, 
-                total=Decimal('0.00') 
-            )
-            
-            # Forzar la fecha
-            venta.fecha_venta = fecha_venta_simulada
-            venta.save(update_fields=['fecha_venta'])
+                dias_atras = random.randint(1, 730)
+                fecha_venta_simulada = now - timedelta(days=dias_atras)
+                
+                venta = Venta.objects.create(
+                    cliente=cliente_aleatorio, 
+                    vendedor=vendedor_aleatorio,
+                    estado=Venta.EstadoVenta.ENTREGADO, # <-- Estado correcto
+                    total=Decimal('0.00') 
+                )
+                
+                # Forzar la fecha (para saltar auto_now_add)
+                venta.fecha_venta = fecha_venta_simulada
+                venta.save(update_fields=['fecha_venta'])
 
-            # 4. Crear Detalles de Venta (1 a 5 productos por venta)
-            num_items = random.randint(1, 5)
-            venta_total_calculado = Decimal('0.00')
-            productos_usados = set() 
+                num_items = random.randint(1, 5)
+                venta_total_calculado = Decimal('0.00')
+                productos_usados = set() 
 
-            # Usamos un bucle protegido para la creación de detalles
-            for _ in range(num_items):
-                try: 
+                for _ in range(num_items):
                     producto_aleatorio = random.choice(productos)
                     if producto_aleatorio.id in productos_usados:
                         continue 
@@ -70,6 +80,7 @@ def seed_ventas_ia(cantidad_a_crear=365):
                     cantidad_comprada = random.randint(1, 3) 
                     
                     if producto_aleatorio.stock < cantidad_comprada:
+                        productos.remove(producto_aleatorio) # Lo quitamos para no volver a intentarlo
                         continue 
 
                     precio_en_venta = producto_aleatorio.precio 
@@ -84,22 +95,18 @@ def seed_ventas_ia(cantidad_a_crear=365):
                     venta_total_calculado += detalle.subtotal
                     productos_usados.add(producto_aleatorio.id)
                     
-                    # 5. Actualizar Stock
-                    # (Comentado para que no afecte tu inventario real en Render)
-                    # producto_aleatorio.stock -= cantidad_comprada
-                    # producto_aleatorio.save(update_fields=['stock']) 
+                    # (Opcional) Descontar stock
+                    producto_aleatorio.stock -= cantidad_comprada
+                    producto_aleatorio.save(update_fields=['stock']) 
                 
-                except Exception as detail_error:
-                    print(f"Error interno en detalle de venta para venta #{venta.id}: {detail_error}")
-                    continue 
-                    
-            # 6. Actualizar el Total de la Venta
-            if venta_total_calculado > 0:
-                venta.total = venta_total_calculado
-                venta.save(update_fields=['total'])
-                created_count += 1
-            else:
-                # Si la venta quedó vacía, la borramos
-                venta.delete()
+                if venta_total_calculado > 0:
+                    venta.total = venta_total_calculado
+                    venta.save(update_fields=['total'])
+                    created_count += 1
+                else:
+                    venta.delete()
+            
+            except Exception as e:
+                print(f'Error creando venta {i}: {e}')
                     
     return created_count

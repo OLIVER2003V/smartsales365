@@ -1,6 +1,6 @@
 # usuario/urls.py
 from django.urls import path
-from .views import UsuarioRegisterView, UserLogoutView, UserProfileView, PasswordResetRequestView, PasswordResetConfirmView, ProductoViewSet, ClienteViewSet, PasswordChangeView, UsuarioAdminViewSet, CategoriaViewSet, CarritoViewSet, PromocionViewSet, ResenaViewSet, FavoritoViewSet, register_fcm_device, InitializeIADataView
+from .views import UsuarioRegisterView, UserLogoutView, UserProfileView, PasswordResetRequestView, PasswordResetConfirmView, ProductoViewSet, ClienteViewSet, PasswordChangeView, UsuarioAdminViewSet, CategoriaViewSet, CarritoViewSet, PromocionViewSet, ResenaViewSet, FavoritoViewSet, register_fcm_device, 
 from rest_framework.routers import DefaultRouter
 # Crea un router
 router = DefaultRouter()
@@ -32,7 +32,6 @@ urlpatterns = [
     # Paso 2: Confirmación (Este endpoint se llamará desde el link del correo)
     path('auth/password/reset/confirm/', PasswordResetConfirmView.as_view(), name='password_reset_confirm'),
     path('register-fcm-device/', register_fcm_device, name='register-fcm-device'),
-    path('init-ia-data/', InitializeIADataView.as_view(), name='init-ia-data'),
 ]
 
 urlpatterns += router.urls

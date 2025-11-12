@@ -18,7 +18,10 @@ from decimal import Decimal
 from fcm_django.models import FCMDevice
 from firebase_admin.messaging import Message, Notification
 
-
+from rest_framework.permissions import AllowAny
+from django.db import transaction
+from usuario.data_seeder import seed_ventas_ia # <-- IMPORTAMOS TU LÓGICA AVANZADA
+from analitica.ml_service import train_sales_model
 
 
 # =========================================================
@@ -402,3 +405,53 @@ class GestionarGarantiaView(APIView):
         
         return Response({"status": f"Garantía actualizada a: {garantia.get_estado_display()}"}, status=status.HTTP_200_OK)
     
+class RunPopulateView(APIView):
+    """
+    Permite poblar la base de datos remotamente con datos falsos (IA)
+    usando la lógica avanzada de 'data_seeder'.
+    
+    Uso (Navegador): 
+    .../api/run-populate/?key=d4c0a8b1-ventas-populate-20253&cantidad=500
+    """
+    permission_classes = [AllowAny] # 👈 Permitir acceso sin autenticación
+
+    def get(self, request, *args, **kwargs):
+        # 1️⃣ Validar clave secreta
+        key = request.query_params.get("key")
+        expected_key = "d4c0a8b1-ventas-populate-20253" # (Tu clave)
+
+        if key != expected_key:
+            print("Intento fallido de 'run-populate': Clave incorrecta.")
+            return Response(
+                {"error": "No autorizado. Clave incorrecta."},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+
+        # 2️⃣ Cantidad de ventas
+        try:
+            cantidad = int(request.query_params.get("cantidad", 365))
+            if cantidad > 5000:
+                 return Response({"error": "Límite de 5000 ventas para evitar sobrecarga."}, status=status.HTTP_400_BAD_REQUEST)
+        except ValueError:
+             return Response({"error": "La cantidad debe ser un número."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 3️⃣ Llamar a la lógica avanzada de 'data_seeder'
+        print(f"Iniciando generación de {cantidad} ventas sintéticas...")
+        
+        try:
+            # --- LLAMADA A LA LÓGICA AVANZADA ---
+            created_count = seed_ventas_ia(cantidad)
+            
+            # --- RE-ENTRENAR EL MODELO IA ---
+            print("Re-entrenando modelo de IA...")
+            train_sales_model()
+            
+            print(f"Proceso completado. Creadas {created_count} ventas.")
+            return Response({
+                "success": f"Proceso completado. Creadas {created_count} ventas históricas. Modelo IA re-entrenado."
+            }, status=status.HTTP_201_CREATED) # 201 CREATED es el código correcto
+        
+        except Exception as e:
+            # Captura errores de 'seed_ventas_ia' (ej. "No hay productos")
+            print(f"Error al inicializar datos: {str(e)}")
+            return Response({"error": f"Error al inicializar datos: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
