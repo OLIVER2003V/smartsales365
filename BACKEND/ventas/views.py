@@ -17,6 +17,9 @@ from usuario.promocion_utils import get_precio_final
 from decimal import Decimal
 from fcm_django.models import FCMDevice
 from firebase_admin.messaging import Message, Notification
+
+from django.core.management import call_command
+from django.http import JsonResponse
 # =========================================================
 # VISTAS DE VENTAS
 # =========================================================
@@ -398,3 +401,25 @@ class GestionarGarantiaView(APIView):
         
         return Response({"status": f"Garantía actualizada a: {garantia.get_estado_display()}"}, status=status.HTTP_200_OK)
     
+def run_populate_ventas(request):
+    """
+    Endpoint temporal para poblar la base de datos con ventas sintéticas.
+    Se accede mediante una clave secreta ?key=...
+    Ejemplo:
+    https://tuapp.onrender.com/api/ventas/run-populate/?key=CLAVE&cantidad=200
+    """
+    secret_key = request.GET.get('key')
+    expected_key = getattr(settings, 'POPULATE_SECRET_KEY', None)
+
+    if not expected_key:
+        return JsonResponse({'error': '⚠️ No se configuró POPULATE_SECRET_KEY en settings.'}, status=500)
+
+    if secret_key != expected_key:
+        return JsonResponse({'error': '⛔ Acceso no autorizado'}, status=403)
+
+    try:
+        cantidad = int(request.GET.get('cantidad', 200))
+        call_command('populate_ventas', cantidad=cantidad)
+        return JsonResponse({'status': '✅ OK', 'message': f'Se generaron {cantidad} ventas sintéticas correctamente.'})
+    except Exception as e:
+        return JsonResponse({'error': f'❌ Error ejecutando comando: {str(e)}'}, status=500)
