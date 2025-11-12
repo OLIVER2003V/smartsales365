@@ -23,7 +23,8 @@ import toast from 'react-hot-toast';
 import { 
     Loader2, Train, Download, DollarSign, Box, List, Calendar, 
     BarChart3, History, TrendingDown, AlertTriangle, CheckCircle, 
-    Info, SlidersHorizontal, X
+    Info, SlidersHorizontal, X, TrendingUp, Zap, // <-- AÑADE ESTE
+    CalendarDays, BarChartBig
 } from 'lucide-react';
 
 // --- Colores de Tailwind para Gráficos ---
@@ -34,7 +35,21 @@ const colorEmerald = '#10B981';      // emerald-500
 const SpinnerIcon = (props) => (
     <Loader2 className={`animate-spin ${props.className || 'h-5 w-5'}`} {...props} />
 );
-
+const StatCard = ({ title, value, context, icon, colorClass = 'text-indigo-600' }) => {
+    const Icon = icon;
+    return (
+        <div className="bg-white p-5 rounded-xl shadow-md border border-slate-200 flex items-start gap-4 h-full">
+            <div className={`flex-shrink-0 h-10 w-10 flex items-center justify-center rounded-lg ${colorClass.replace('text', 'bg').replace('600', '100')} ${colorClass}`}>
+                <Icon size={22} />
+            </div>
+            <div>
+                <p className="text-sm font-medium text-slate-500 uppercase tracking-wide">{title}</p>
+                <p className="text-2xl font-bold text-slate-900">{value}</p>
+                <p className="text-sm text-slate-600">{context}</p>
+            </div>
+        </div>
+    );
+};
 // --- ✨ KpiCard Rediseñada ---
 const KpiCard = ({ title, value, icon, isLoading }) => (
     <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-200 flex items-center justify-between transition hover:shadow-xl">
@@ -233,13 +248,149 @@ const BajaRotacionWidget = ({ data, isLoading }) => {
         </div>
     );
 };
+const InsightsWidget = ({ insights }) => {
+    if (!insights || !insights.feature_importances || !insights.weekly_trend || !insights.monthly_trend) {
+        // No mostrar nada si los insights no están listos
+        return null; 
+    }
 
+    // --- ¡NUEVO! Mapa de Traducción Profesional ---
+    // Mapea los nombres técnicos del backend a nombres amigables.
+    const FEATURE_MAP = {
+        'dia_del_anio': 'Estacionalidad Anual',
+        'dia_de_la_semana': 'Patrón Semanal',
+        'mes': 'Patrón Mensual',
+        'dia_del_mes': 'Día del Mes',
+        'anio': 'Tendencia Interanual'
+    };
+    // --- Fin del Mapa ---
+
+    try {
+        // --- 1. Extracción y Formateo de Datos ---
+        const { feature_importances, weekly_trend, monthly_trend } = insights;
+        
+        const topFeature = feature_importances[0]; // Ej: ['dia_del_anio', 0.45]
+        const topFeatureKey = topFeature[0];      // Ej: 'dia_del_anio'
+        const topFeaturePct = (topFeature[1] * 100).toFixed(0);
+
+        // --- ¡CAMBIO CLAVE! ---
+        // Usamos el mapa para obtener un nombre amigable.
+        let topFeatureName = FEATURE_MAP[topFeatureKey] || (
+            topFeatureKey.replace(/_/g, ' ').charAt(0).toUpperCase() + topFeatureKey.replace(/_/g, ' ').slice(1)
+        );
+
+        // (El resto de la lógica de extracción de datos no cambia)
+        const sortedWeek = [...weekly_trend].sort((a, b) => a.promedio_bs - b.promedio_bs);
+        const worstDay = sortedWeek[0];
+        const bestDay = sortedWeek[sortedWeek.length - 1];
+        const bestDaySalesFormatted = bestDay.promedio_bs.toLocaleString('es-BO', { style: 'currency', currency: 'BOB' });
+        const worstDaySalesFormatted = worstDay.promedio_bs.toLocaleString('es-BO', { style: 'currency', currency: 'BOB' });
+
+        const sortedMonths = [...monthly_trend].sort((a, b) => a.promedio_bs - b.promedio_bs);
+        const worstMonth = sortedMonths[0];
+        const bestMonth = sortedMonths[sortedMonths.length - 1];
+        const bestMonthSalesFormatted = bestMonth.promedio_bs.toLocaleString('es-BO', { style: 'currency', currency: 'BOB' });
+        const worstMonthSalesFormatted = worstMonth.promedio_bs.toLocaleString('es-BO', { style: 'currency', currency: 'BOB' });
+
+        // --- 2. Renderizado del Componente ---
+        return (
+            // --- CAMBIO DE DISEÑO ---
+            // Fondo blanco para integrarse con el dashboard, en lugar de bg-slate-50
+            <div className="bg-white p-6 md:p-8 rounded-xl shadow-lg border border-slate-200 space-y-6">
+                
+                {/* Título Principal del Widget */}
+                <h3 className="text-2xl font-bold text-slate-900 flex items-center gap-3">
+                    <TrendingUp className="text-indigo-600 w-8 h-8" />
+                    Insights Clave para tus Ventas
+                </h3>
+                
+                {/* --- CAMBIO DE DISEÑO --- */}
+                {/* Sección 1: Factor Clave (Adiós "color azulito") */}
+                {/* Usamos un fondo sutil bg-slate-100 en lugar de bg-indigo-600 */}
+                <div className="bg-slate-100 border border-slate-200 p-5 rounded-lg flex items-center gap-4">
+                    <BarChartBig size={28} className="flex-shrink-0 text-indigo-600" />
+                    <div>
+                        <h4 className="font-semibold text-lg text-indigo-700">Factor Clave: {topFeatureName}</h4>
+                        <p className="text-slate-600 text-md">
+                            Este factor explica aproximadamente el <strong>{topFeaturePct}%</strong> de la variabilidad de tus ventas. 
+                            Los patrones relacionados con {topFeatureKey === 'mes' ? 'el' : 'la'} {topFeatureName.split(' ')[0].toLowerCase()} son cruciales.
+                        </p>
+                    </div>
+                </div>
+
+                {/* Sección 2: Grid de Stats (Sin cambios, ya era claro) */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+                    <StatCard
+                        title="Día Más Fuerte"
+                        value={bestDay.dia}
+                        context={`Promedio: ${bestDaySalesFormatted}`}
+                        icon={TrendingUp}
+                        colorClass="text-emerald-600"
+                    />
+                    <StatCard
+                        title="Día Más Débil"
+                        value={worstDay.dia}
+                        context={`Promedio: ${worstDaySalesFormatted}`}
+                        icon={TrendingDown}
+                        colorClass="text-red-600"
+                    />
+                    <StatCard
+                        title="Mes Más Fuerte"
+                        value={bestMonth.mes}
+                        context={`Promedio: ${bestMonthSalesFormatted}`}
+                        icon={Calendar}
+                        colorClass="text-emerald-600"
+                    />
+                    <StatCard
+                        title="Mes Más Débil"
+                        value={worstMonth.mes}
+                        context={`Promedio: ${worstMonthSalesFormatted}`}
+                        icon={CalendarDays}
+                        colorClass="text-red-600"
+                    />
+                </div>
+
+                {/* Sección 3: Consejos (Sin cambios, ya era claro) */}
+                <div className="p-5 bg-white rounded-lg shadow-md border border-gray-200 space-y-3">
+                    <h4 className="text-xl font-semibold text-slate-800 flex items-center gap-2">
+                        <Info className="text-indigo-500 w-6 h-6" />
+                        Consejos para Administradores
+                    </h4>
+                    <ul className="list-disc list-inside pl-4 space-y-2 text-slate-700">
+                        <li>
+                            <strong>Optimiza tu inventario:</strong> Asegura tener suficiente stock para los <span className="font-medium text-emerald-700">{bestDay.dia}s</span> y durante <span className="font-medium text-emerald-700">{bestMonth.mes}</span>.
+                        </li>
+                        <li>
+                            <strong>Estrategias de Marketing:</strong> Lanza promociones para estimular las ventas durante los <span className="font-medium text-red-700">{worstDay.dia}s</span> y en <span className="font-medium text-red-700">{worstMonth.mes}</span>.
+                        </li>
+                        <li>
+                            <strong>Gestión de Personal:</strong> Considera ajustar horarios para tener más apoyo durante los días y meses de mayor actividad.
+                        </li>
+                    </ul>
+                </div>
+                
+                <div className="text-center text-sm text-slate-500 pt-4 border-t border-slate-200">
+                    *Análisis basado en el historial de ventas 'Entregadas' de tu empresa.
+                </div>
+            </div>
+        );
+    } catch (error) {
+        console.error("Error renderizando InsightsWidget:", error);
+        return (
+            <AlertMessage
+                msg="No se pudieron cargar los insights del modelo. Asegúrate de que el modelo ha sido entrenado y hay suficientes datos."
+                type="error"
+            />
+        );
+    }
+};
 // ================================
 // --- VISTA #1: PREDICCIONES ---
 // ================================
 const VistaFuturo = ({ onTrainModel, isTraining, kpis }) => {
     const { token } = useAuth();
     const [predicciones, setPredicciones] = useState(null);
+    const [metadata, setMetadata] = useState(null);
     const [diasAPredecir, setDiasAPredecir] = useState(30);
     const [isLoadingChart, setIsLoadingChart] = useState(true);
     const [message, setMessage] = useState('');
@@ -258,9 +409,12 @@ const VistaFuturo = ({ onTrainModel, isTraining, kpis }) => {
             setMessage(`Generando predicción para ${dias} días...`);
             setMessageType('info');
             setPredicciones(null);
+            setMetadata(null);
 
             try {
-                const data = await getPrediccionesVentas(token, dias);
+                const responseData = await getPrediccionesVentas(token, dias);
+                const data = responseData.predicciones;
+                setMetadata(responseData.metadata);
                 let formattedData;
 
                 if (dias > 90) {
@@ -325,6 +479,7 @@ const VistaFuturo = ({ onTrainModel, isTraining, kpis }) => {
                 console.error('Error al cargar predicciones:', error);
                 setMessage(error.error || 'Error al cargar predicciones.');
                 setMessageType('error');
+                setMetadata(null);
             } finally {
                 setIsLoadingChart(false);
             }
@@ -486,6 +641,17 @@ const VistaFuturo = ({ onTrainModel, isTraining, kpis }) => {
                     </button>
                 ))}
             </div>
+            
+            {/* --- ✨ NUEVO: Mostramos la Interpretación --- */}
+            {/* Esto mostrará el margen de error y la explicación */}
+            {!isLoadingChart && metadata && metadata.interpretacion && (
+                <AlertMessage msg={metadata.interpretacion} type="info" />
+            )}
+            {!isLoadingChart && metadata && metadata.insights && (
+                <div className="my-6"> {/* Añadimos un margen */}
+                    <InsightsWidget insights={metadata.insights} />
+                </div>
+            )}
 
             {message && messageType === 'error' && (
                 <AlertMessage msg={message} type="error" />

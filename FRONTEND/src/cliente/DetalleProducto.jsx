@@ -1,361 +1,379 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-// ✨ 1. Importa la API de reclamo
-import { iniciarReclamoGarantia } from '../api/garantia'; 
-// Asumimos que tienes una función para obtener la venta en 'api/venta.js'
-import { getVentaById } from '../api/venta'; 
-import { getResenasPorProducto } from '../api/resena';
-import { getProducts } from '../api/producto';
+import { useCart } from '../context/CartContext';
+import { useFavorites } from '../context/FavoritesContext';
 import toast from 'react-hot-toast';
-import { Loader2, ArrowLeft, Star, Edit, Package, ShieldAlert } from 'lucide-react'; // ✨ 2. Añade ShieldAlert
-import ResenaModal from './ResenaModal'; 
 
-// --- ✨ NUEVO: Modal para Iniciar Reclamo ---
-// (Componente interno para este archivo)
-const ReclamoModal = ({ garantia, onClose, onReclamoExitoso, token }) => {
-    const [motivo, setMotivo] = useState('');
-    const [isLoading, setIsLoading] = useState(false);
+// --- API ---
+// Importamos las funciones de sus archivos correctos
+import { getProductoById } from '../api/producto'; 
+import { 
+    getResenasPorProducto, 
+    createResena // <-- Usamos el nombre 'createResena' de tu api/resena.js
+} from '../api/resena'; 
 
-    const handleSubmit = async () => {
-        if (!motivo.trim()) {
-            return toast.error("Debes explicar el motivo del reclamo.");
-        }
-        setIsLoading(true);
-        try {
-            // Llama a la API con el token
-            await iniciarReclamoGarantia(token, garantia.id, motivo);
-            toast.success("Reclamo iniciado. Nuestro equipo lo revisará.");
-            onReclamoExitoso(); // Llama a la función para refrescar
-        } catch (error) {
-            toast.error(error.message);
-        } finally {
-            setIsLoading(false);
-        }
-    };
+// --- Componentes e Iconos ---
+import StarRating from '../components/StarRating'; 
+import { 
+    Loader2, AlertTriangle, ImageOff, Percent, ShoppingCart, 
+    Heart, CheckCircle, Minus, Plus, ArrowLeft, Send, Star
+} from 'lucide-react';
 
-    return (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex justify-center items-center p-4">
-            <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md">
-                <h3 className="text-xl font-semibold text-slate-900">Iniciar Reclamo de Garantía</h3>
-                {/* Asumimos que la 'garantia' tiene esta info anidada */}
-                <p className="text-sm text-slate-600 mt-2">
-                    Producto: <span className="font-medium text-slate-800">{garantia.detalle_venta.producto.nombre}</span>
-                </p>
-                <p className="text-sm text-slate-500">
-                    Código: <span className="font-mono">{garantia.codigo_garantia.substring(0, 8)}...</span>
-                </p>
-                
-                <div className="mt-4">
-                    <label htmlFor="motivo" className="block text-sm font-medium text-slate-700 mb-1">
-                        Describe la falla o el problema
-                    </label>
-                    <textarea
-                        id="motivo"
-                        value={motivo}
-                        onChange={(e) => setMotivo(e.target.value)}
-                        placeholder="Ej: El producto no enciende, hace un ruido extraño, etc."
-                        className="w-full border border-slate-300 rounded-lg p-2 mt-1 h-32 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                        disabled={isLoading}
-                    />
-                </div>
-                <div className="flex justify-end gap-3 mt-6">
-                    <button 
-                        onClick={onClose} 
-                        disabled={isLoading} 
-                        className="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 rounded-lg hover:bg-slate-200 transition disabled:opacity-50"
-                    >
-                        Cancelar
-                    </button>
-                    <button 
-                        onClick={handleSubmit} 
-                        disabled={isLoading} 
-                        className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition flex items-center gap-2 disabled:bg-indigo-300"
-                    >
-                        {isLoading ? <Loader2 className="animate-spin" size={18} /> : null}
-                        {isLoading ? "Enviando..." : "Enviar Reclamo"}
-                    </button>
-                </div>
-            </div>
+const formatPrice = (price) => {
+    const numericPrice = Number(price);
+    if (isNaN(numericPrice)) return 'N/A';
+    return numericPrice.toLocaleString('es-BO', { style: 'currency', currency: 'BOB' });
+};
+
+// --- Componente de Reseña Individual ---
+const ReviewItem = ({ review }) => (
+    <div className="py-4 border-b border-slate-200">
+        <div className="flex items-center mb-1">
+            <StarRating rating={review.calificacion} readOnly={true} />
+            <span className="ml-2 text-sm font-semibold text-slate-800">{review.titulo}</span>
         </div>
-    );
-};
-
-// --- Utilidades de Formato (Sin cambios) ---
-const formatPrice = (price) => Number(price).toLocaleString('es-BO', { style: 'currency', currency: 'BOB' });
-const formatDate = (dateString) => {
-    // ... (tu código de formato)
-    if (!dateString) return 'N/A';
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) return 'Fecha Inválida';
-    return date.toLocaleString('es-ES', {
-        day: '2-digit', month: 'long', year: 'numeric', 
-        hour: '2-digit', minute: '2-digit'
-    });
-};
-
-// --- Icono de Carga (Sin cambios) ---
-const SpinnerIcon = () => (
-    <div className="flex justify-center items-center h-[calc(100vh-200px)]">
-        <Loader2 className="animate-spin h-12 w-12 text-indigo-600" />
+        <p className="text-sm text-slate-600 mb-2">
+            Por <span className="font-medium">{review.usuario_nombre || 'Anónimo'}</span> 
+            el {new Date(review.fecha_creacion).toLocaleDateString('es-ES')}
+        </p>
+        <p className="text-slate-700 text-base">{review.comentario}</p>
     </div>
 );
 
-// --- Componente de Fila de Producto (Sin cambios) ---
-// Este componente solo maneja la info del producto y la reseña
-const ProductRow = ({ detalle, productMap, resenasUsuario, ventaEstado, onResenaClick }) => {
-    
-    const productoId = detalle.producto;
-    const productoCompleto = productMap.get(productoId);
-    
-    const productoNombre = detalle.nombre_producto || productoCompleto?.nombre || "Producto Desconocido";
-    const productoImagen = productoCompleto?.imagen_url;
+// --- Componente de Formulario de Reseña ---
+const ReviewForm = ({ productoId, user, onReviewSubmitted }) => {
+    const [rating, setRating] = useState(0);
+    const [titulo, setTitulo] = useState('');
+    const [comentario, setComentario] = useState('');
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const { token } = useAuth();
 
-    const yaResenado = resenasUsuario.some(r => r.producto === productoId);
-    const puedeResenar = ventaEstado === 'OK' && !yaResenado;
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (rating === 0 || !titulo || !comentario) {
+            toast.error("Por favor, completa la calificación, título y comentario.");
+            return;
+        }
+        setIsSubmitting(true);
+        try {
+            // Tu API 'createResena' espera (token, resenaData)
+            const nuevaResena = await createResena(token, { 
+                producto: productoId, // El backend espera el ID del producto en el cuerpo
+                calificacion: rating, 
+                titulo, 
+                comentario 
+            });
+            toast.success("¡Gracias por tu reseña!");
+            onReviewSubmitted(nuevaResena); // Añade la nueva reseña a la lista en vivo
+            setRating(0);
+            setTitulo('');
+            setComentario('');
+        } catch (error) {
+            console.error("Error al enviar reseña:", error);
+            toast.error(error.error || "Error al enviar reseña. Es posible que ya hayas reseñado este producto.");
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
 
-    return (
-        <div className="flex flex-col sm:flex-row items-center gap-4 p-4 border border-slate-200 rounded-lg bg-white">
-            
-            {/* ... (Imagen del producto) ... */}
-            <div className="flex-shrink-0 h-24 w-24 flex items-center justify-center rounded-md border border-slate-200 bg-slate-50 overflow-hidden">
-                {productoImagen ? (
-                    <img src={productoImagen} alt={productoNombre} className="h-full w-full object-contain" />
-                ) : (
-                    <Package size={32} className="text-slate-400" />
-                )}
-            </div>
-            
-            {/* ... (Info del producto) ... */}
-            <div className="flex-1 text-center sm:text-left">
-                <Link to={`/producto/${productoId}`} className="font-semibold text-lg text-slate-900 hover:text-indigo-600 hover:underline">
-                    {productoNombre}
-                </Link>
-                <p className="text-sm text-slate-500">
-                    {detalle.cantidad} {detalle.cantidad > 1 ? 'unidades' : 'unidad'} x {formatPrice(detalle.precio_unitario)}
-                </p>
-                <p className="text-base font-semibold text-slate-800 mt-1">
-                    Subtotal: {formatPrice(detalle.subtotal)}
-                </p>
-            </div>
-            
-            {/* ... (Botón de Reseña) ... */}
-            <div className="w-full sm:w-auto sm:min-w-[180px] flex justify-center">
-                {ventaEstado !== 'OK' && (
-                    <span className="text-sm text-slate-500 italic text-center sm:text-right">Podrás dejar tu reseña cuando el pedido sea entregado.</span>
-                )}
-                {yaResenado && (
-                    <span className="flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-green-700 bg-green-100 rounded-lg">
-                        <Star size={16} /> Reseña enviada
-                    </span>
-                )}
-                {puedeResenar && (
-                    <button
-                        onClick={() => onResenaClick({ id: productoId, nombre: productoNombre })}
-                        className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-lg shadow-sm hover:bg-indigo-700 transition focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
-                    >
-                        <Edit size={16} /> Dejar Reseña
-                    </button>
-                )}
-            </div>
-        </div>
-    );
+    
 };
 
 
-// --- Componente Principal (ACTUALIZADO) ---
-const DetalleCompra = () => {
-    const { ventaId } = useParams();
-    const { token } = useAuth();
+// --- Componente Principal ---
+const DetalleProducto = () => {
+    const { id } = useParams();
     const navigate = useNavigate();
+    const { token, user } = useAuth();
+    const { addToCart, cartItems, loading: isCartLoading } = useCart();
+    const { isFavorite, toggleFavorite, isLoadingFavorites } = useFavorites();
 
-    const [venta, setVenta] = useState(null);
-    const [resenasUsuario, setResenasUsuario] = useState([]);
+    const [product, setProduct] = useState(null);
+    const [reviews, setReviews] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
-    const [productMap, setProductMap] = useState(new Map());
-    
-    // Hooks para el modal de Reseña
-    const [isModalOpen, setIsModalOpen] = useState(false);
-    const [productoAResenar, setProductoAResenar] = useState(null);
-    
-    // --- ✨ 3. Hooks para el modal de Garantía ---
-    const [modalGarantia, setModalGarantia] = useState(null);
+    const [error, setError] = useState('');
+    const [quantity, setQuantity] = useState(1);
+    const [isAdding, setIsAdding] = useState(false);
 
-    // loadDatos (Sin cambios, tu lógica original está bien)
-    const loadDatos = useCallback(async () => {
-        if (!token || !ventaId) {
-            navigate('/mis-compras');
+    // Carga de datos del producto y reseñas
+    useEffect(() => {
+        const loadData = async () => {
+            if (!id) return;
+            setIsLoading(true);
+            setError('');
+            try {
+                // 1. Llama a 'getProductoById' (necesita token)
+                // 2. Llama a 'getResenasPorProducto' (no necesita token según tu api/resena.js)
+                const [productData, reviewsData] = await Promise.all([
+                    getProductoById(token, id), // Nombre corregido
+                    getResenasPorProducto(id)  // Argumentos corregidos (solo ID)
+                ]);
+                
+                setProduct(productData);
+                setReviews(reviewsData);
+
+            } catch (err) {
+                console.error("Error al cargar datos:", err);
+                setError("No se pudo cargar el producto. Inténtalo de nuevo.");
+                toast.error("Error al cargar el producto.");
+                navigate('/catalogo'); // Redirige si el producto no se encuentra
+            } finally {
+                setIsLoading(false);
+            }
+        };
+        loadData();
+    }, [id, token, navigate]); // Depende de 'token' porque getProductoById lo usa
+
+    // --- Lógica del Carrito ---
+    // --- ✨ ¡AQUÍ ESTÁ LA CORRECCIÓN DEL ERROR DE INICIALIZACIÓN! ---
+    const { quantityInCart, stockDisponible, stockStatus } = useMemo(() => {
+        if (!product) return { quantityInCart: 0, stockDisponible: 0, stockStatus: 'Agotado' };
+
+        const itemInCart = cartItems.find(item => item.producto.id === product.id);
+        const qInCart = itemInCart ? itemInCart.cantidad : 0;
+        const sDisponible = product.stock - qInCart;
+
+        let status = 'Disponible'; // Se declara la variable 'status'
+        if (product.stock <= 0) status = 'Agotado';
+        else if (sDisponible <= 0) status = 'En Carrito (Límite)';
+        else if (sDisponible <= 5) status = 'Pocas Unidades';
+        
+        // El error estaba aquí: Se debe retornar 'status', no 'stockStatus'
+        return { quantityInCart: qInCart, stockDisponible: sDisponible, stockStatus: status };
+    }, [product, cartItems]);
+    // --- FIN DE LA CORRECCIÓN ---
+
+    const handleQuantityChange = (delta) => {
+        setQuantity(prev => {
+            const newQty = prev + delta;
+            if (newQty < 1) return 1;
+            if (newQty > stockDisponible && stockDisponible > 0) return stockDisponible;
+            if (stockDisponible <= 0) return 1;
+            return newQty;
+        });
+    };
+
+    const handleAddToCart = () => {
+        if (quantity > stockDisponible || quantity <= 0) {
+            toast.error("No puedes añadir esa cantidad.");
             return;
         }
-        setIsLoading(true);
-        try {
-            // Asumimos que getVentaById devuelve la venta con detalles y garantías anidadas
-            // y que getProducts(token) es necesario para las imágenes.
-            const [dataVenta, dataResenas, dataProductos] = await Promise.all([
-                getVentaById(token, ventaId),
-                getResenasPorProducto(null), // Asumimos que esto busca las reseñas DEL USUARIO LOGUEADO
-                getProducts(token)
-            ]);
-            
-            const map = new Map();
-            dataProductos.forEach(prod => {
-                map.set(prod.id, prod); 
-            });
-            
-            setVenta(dataVenta);
-            setResenasUsuario(dataResenas);
-            setProductMap(map); 
-
-        } catch (error) {
-            console.error("Error al cargar datos:", error);
-            toast.error("No se pudo cargar la compra o no tienes permiso.");
-            navigate('/mis-compras');
-        } finally {
-            setIsLoading(false);
-        }
-    }, [token, ventaId, navigate]);
-
-    useEffect(() => {
-        loadDatos();
-    }, [loadDatos]);
-
-    // --- Manejadores de Modal (Reseña) ---
-    const handleOpenModal = (producto) => {
-        setProductoAResenar(producto); 
-        setIsModalOpen(true);
-    };
-    const handleCloseModal = () => {
-        setIsModalOpen(false);
-        setProductoAResenar(null);
-    };
-    const handleResenaSuccess = () => {
-        handleCloseModal();
-        loadDatos(); // Refresca los datos
+        setIsAdding(true);
+        addToCart(product, quantity);
+        toast.success(`Añadido ${quantity} x "${product.nombre}" al carrito.`, { icon: '🛒' });
+        setQuantity(1); 
+        setTimeout(() => setIsAdding(false), 1000);
     };
 
-    if (isLoading) {
+    const handleFavoriteClick = (e) => {
+        e.stopPropagation();
+        toggleFavorite(product.id);
+    };
+
+    // Añade la nueva reseña a la lista sin recargar la página
+    const handleReviewSubmitted = (nuevaResena) => {
+        setReviews([nuevaResena, ...reviews]);
+        setProduct(prev => {
+            const newTotalResenas = (prev.total_resenas || 0) + 1;
+            const newPromedio = ((prev.calificacion_promedio * (prev.total_resenas || 0)) + nuevaResena.calificacion) / newTotalResenas;
+            return {
+                ...prev,
+                total_resenas: newTotalResenas,
+                calificacion_promedio: newPromedio
+            };
+        });
+    };
+
+    // --- Renderizado ---
+    if (isLoading || isLoadingFavorites) {
         return (
-            <div className="min-h-screen bg-slate-100">
-                <SpinnerIcon />
+            <div className="flex justify-center items-center h-[calc(100vh-64px)]">
+                <Loader2 className="animate-spin h-12 w-12 text-indigo-600" />
             </div>
         );
     }
 
-    if (!venta) return null;
+    if (error) {
+        return (
+            <div className="flex justify-center items-center h-[calc(100vh-64px)] text-red-600">
+                <AlertTriangle size={24} className="mr-2" /> {error}
+            </div>
+        );
+    }
+
+    if (!product) return null; // No renderiza nada si el producto no está
+
+    // Variables de estado para la UI
+    const isProductFavorite = isFavorite(product.id);
+    const hayOferta = product.precio_final < product.precio;
 
     return (
-        <>
-            {/* Modal de Reseña */}
-            {isModalOpen && (
-                <ResenaModal
-                    isOpen={isModalOpen}
-                    onClose={handleCloseModal}
-                    onSuccess={handleResenaSuccess}
-                    producto={productoAResenar} 
-                />
-            )}
-            
-            {/* --- ✨ 4. Modal de Garantía --- */}
-            {modalGarantia && (
-                <ReclamoModal 
-                    garantia={modalGarantia}
-                    token={token} // Pasa el token
-                    onClose={() => setModalGarantia(null)}
-                    onReclamoExitoso={() => {
-                        setModalGarantia(null); // Cierra el modal
-                        loadDatos(); // Refresca los datos para mostrar el nuevo estado
-                    }}
-                />
-            )}
+        <div className="min-h-screen bg-slate-100">
+            <div className="container mx-auto max-w-7xl p-4 md:p-8">
+                
+                {/* Botón Volver */}
+                <button
+                    onClick={() => navigate('/catalogo')}
+                    className="inline-flex items-center gap-2 text-sm font-medium text-indigo-600 hover:text-indigo-800 mb-4"
+                >
+                    <ArrowLeft size={16} />
+                    Volver al Catálogo
+                </button>
 
-            <div className="min-h-screen bg-slate-100 p-4 md:p-8">
-                <div className="max-w-4xl mx-auto">
-                    
-                    {/* Botón de Volver (Sin cambios) */}
-                    <Link
-                        to="/mis-compras"
-                        className="inline-flex items-center gap-2 text-indigo-600 hover:text-indigo-800 font-medium mb-4 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 rounded-md"
-                    >
-                        <ArrowLeft size={18} />
-                        Volver a Mis Compras
-                    </Link>
-                    
-                    <div className="bg-white p-6 md:p-8 rounded-xl shadow-lg border border-slate-200">
-                        {/* Encabezado del Pedido (Sin cambios) */}
-                        <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 pb-6 border-b border-slate-200">
-                            {/* ... (tu código de encabezado) ... */}
-                            <div>
-                                <h1 className="text-3xl font-bold text-slate-900">Detalle del Pedido</h1>
-                                <p className="text-slate-500">
-                                    Pedido <span className="font-semibold text-indigo-700">#{venta.id}</span>
-                                </p>
-                            </div>
-                            <div className="flex-shrink-0 flex flex-col items-start sm:items-end">
-                                <p className="text-sm text-slate-500">Comprado el: {formatDate(venta.fecha_venta)}</p>
-                                <p className="text-2xl font-bold text-slate-900">{formatPrice(venta.total)}</p>
-                            </div>
+                {/* Grid Principal */}
+                <div className="bg-white rounded-xl shadow-lg border border-slate-200 p-4 md:p-8">
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12">
+                        
+                        {/* --- Columna de Imagen --- */}
+                        <div className="relative h-96 md:h-[500px] w-full bg-slate-100 rounded-lg flex items-center justify-center overflow-hidden">
+                            {product.imagen_url ? (
+                                <img
+                                    src={product.imagen_url}
+                                    alt={product.nombre}
+                                    className="h-full w-full object-contain"
+                                />
+                            ) : (
+                                <ImageOff size={64} className="text-slate-400" />
+                            )}
+                            {hayOferta && (
+                                <div className="absolute top-4 left-4 bg-red-600 text-white text-sm font-medium px-3 py-1 rounded-full shadow-lg flex items-center gap-1">
+                                    <Percent size={16} />
+                                    ¡OFERTA!
+                                </div>
+                            )}
                         </div>
 
-                        {/* Lista de Productos */}
-                        <div className="mt-8 space-y-6">
-                            <h2 className="text-xl font-semibold text-slate-800">Productos en este pedido</h2>
+                        {/* --- Columna de Detalles --- */}
+                        <div className="flex flex-col justify-center">
+                            <span className="text-sm font-semibold text-indigo-600 uppercase tracking-wide">
+                                {product.categoria || 'Sin Categoría'}
+                            </span>
+                            <h1 className="text-3xl md:text-4xl font-bold text-slate-900 mt-1 mb-2">
+                                {product.nombre}
+                            </h1>
+                            <p className="text-lg text-slate-500 mb-3">{product.marca} {product.modelo}</p>
                             
-                            <div className="space-y-6"> {/* ✨ Aumentado el space-y */}
-                                {venta.detalles.map(detalle => (
-                                    // Cada "item" ahora es un bloque que contiene el producto Y sus garantías
-                                    <div key={detalle.id} className="bg-slate-50/70 border border-slate-200 rounded-lg">
-                                        {/* Fila del Producto (Reseña) */}
-                                        <ProductRow
-                                            detalle={detalle}
-                                            productMap={productMap}
-                                            resenasUsuario={resenasUsuario}
-                                            ventaEstado={venta.estado}
-                                            onResenaClick={handleOpenModal}
-                                        />
-
-                                        {/* --- ✨ 5. NUEVA SECCIÓN DE GARANTÍAS --- */}
-                                        {/* Asumimos que 'detalle.garantias' viene de la API */}
-                                        {detalle.garantias && detalle.garantias.length > 0 && (
-                                            <div className="mt-2 p-4 border-t border-slate-200">
-                                                <h4 className="text-sm font-medium text-slate-600 mb-2">Garantías Asociadas:</h4>
-                                                <div className="space-y-2">
-                                                    {detalle.garantias.map(garantia => (
-                                                        <div key={garantia.id} className="flex flex-col sm:flex-row justify-between sm:items-center p-3 bg-white rounded-lg border border-slate-300">
-                                                            <div>
-                                                                <span className="text-sm font-mono font-medium text-slate-700">{garantia.codigo_garantia.substring(0, 8)}...</span>
-                                                                {/* Badge de estado de la garantía */}
-                                                                <span className={`ml-2 px-2 py-0.5 text-xs font-semibold rounded-full ${
-                                                                    garantia.estado === 'ACT' ? 'bg-green-100 text-green-700 ring-1 ring-green-200' : 
-                                                                    garantia.estado === 'EXP' ? 'bg-yellow-100 text-yellow-700 ring-1 ring-yellow-200' :
-                                                                    'bg-blue-100 text-blue-700 ring-1 ring-blue-200'
-                                                                }`}>
-                                                                    {garantia.get_estado_display} 
-                                                                </span>
-                                                            </div>
-                                                            {/* Botón para Reclamar */}
-                                                            {garantia.estado === 'ACT' && (
-                                                                <button
-                                                                    onClick={() => setModalGarantia(garantia)}
-                                                                    className="flex mt-2 sm:mt-0 items-center justify-center gap-1.5 w-full sm:w-auto px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 rounded-md hover:bg-blue-700 transition shadow-sm"
-                                                                >
-                                                                    <ShieldAlert size={14} /> Reclamar Garantía
-                                                                </button>
-                                                            )}
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        )}
-                                        {/* --- FIN DE LA SECCIÓN DE GARANTÍAS --- */}
-                                    </div>
-                                ))}
+                            <div className="mb-4">
+                                <StarRating 
+                                    rating={product.calificacion_promedio} 
+                                    totalResenas={product.total_resenas}
+                                    readOnly={true}
+                                />
                             </div>
+
+                            {/* Precios */}
+                            <div className="mb-4">
+                                {hayOferta && (
+                                    <p className="text-xl text-slate-500 line-through">
+                                        {formatPrice(product.precio)}
+                                    </p>
+                                )}
+                                <p className={`text-4xl font-extrabold ${hayOferta ? 'text-red-600' : 'text-slate-800'}`}>
+                                    {formatPrice(product.precio_final)}
+                                </p>
+                            </div>
+
+                            {/* Stock */}
+                            <div className="mb-5">
+                                {stockStatus === 'Agotado' && (
+                                    <span className="flex items-center text-base font-semibold text-red-600"><AlertTriangle size={18} className="mr-2" />Agotado</span>
+                                )}
+                                {stockStatus === 'Pocas Unidades' && (
+                                    <span className="flex items-center text-base font-semibold text-amber-600"><AlertTriangle size={18} className="mr-2" />¡Pocas unidades! ({stockDisponible} disp.)</span>
+                                )}
+                                {stockStatus === 'Disponible' && (
+                                    <span className="flex items-center text-base font-semibold text-green-600"><CheckCircle size={18} className="mr-2" />En Stock</span>
+                                )}
+                                {stockStatus === 'En Carrito (Límite)' && (
+                                    <span className="flex items-center text-base font-semibold text-slate-600"><CheckCircle size={18} className="mr-2" />Ya tienes el máximo en tu carrito</span>
+                                )}
+                            </div>
+
+                            {/* Acciones (Añadir al carrito y Favorito) */}
+                            {stockStatus !== 'Agotado' && (
+                                <div className="flex items-center gap-3 mb-6">
+                                    {/* Selector de Cantidad */}
+                                    <div className="flex items-center border border-slate-300 rounded-lg">
+                                        <button
+                                            onClick={() => handleQuantityChange(-1)}
+                                            disabled={quantity <= 1}
+                                            className="px-3 py-3 text-slate-600 hover:bg-slate-100 rounded-l-lg disabled:opacity-50"
+                                        >
+                                            <Minus size={16} />
+                                        </button>
+                                        <span className="px-5 text-lg font-bold w-16 text-center">{quantity}</span>
+                                        <button
+                                            onClick={() => handleQuantityChange(1)}
+                                            disabled={quantity >= stockDisponible}
+                                            className="px-3 py-3 text-slate-600 hover:bg-slate-100 rounded-r-lg disabled:opacity-50"
+                                        >
+                                            <Plus size={16} />
+                                        </button>
+                                    </div>
+                                    
+                                    {/* Botón Añadir */}
+                                    <button
+                                        onClick={handleAddToCart}
+                                        disabled={isAdding || isCartLoading || stockDisponible <= 0 || quantity > stockDisponible}
+                                        className="flex-1 inline-flex items-center justify-center gap-2 px-6 py-3 bg-indigo-600 text-white font-semibold rounded-lg shadow-sm hover:bg-indigo-700 transition disabled:bg-slate-400 disabled:cursor-not-allowed"
+                                    >
+                                        {isAdding ? <Loader2 className="animate-spin" size={20} /> : <ShoppingCart size={20} />}
+                                        Añadir al Carrito
+                                    </button>
+                                </div>
+                            )}
+
+                             {/* Botón de Favorito (separado) */}
+                            <button
+                                onClick={handleFavoriteClick}
+                                className={`inline-flex items-center justify-center gap-2 p-3 rounded-lg border transition-colors ${
+                                    isProductFavorite 
+                                    ? 'bg-red-50 border-red-200 text-red-600 hover:bg-red-100' 
+                                    : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50 hover:border-slate-400'
+                                }`}
+                            >
+                                <Heart size={20} className={isProductFavorite ? 'fill-current' : ''} />
+                                {isProductFavorite ? 'Guardado en Favoritos' : 'Guardar en Favoritos'}
+                            </button>
+
+                            {/* Descripción */}
+                            {product.descripcion && (
+                                <div className="mt-8 border-t border-slate-200 pt-6">
+                                    <h3 className="text-xl font-semibold text-slate-800 mb-2">Descripción</h3>
+                                    <p className="text-slate-600 whitespace-pre-wrap">{product.descripcion}</p>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>
+
+                {/* --- Sección de Reseñas --- */}
+                <div className="bg-white rounded-xl shadow-lg border border-slate-200 p-4 md:p-8 mt-8">
+                    <h2 className="text-2xl font-bold text-slate-900 mb-4">
+                        Reseñas y Calificaciones ({product.total_resenas || 0})
+                    </h2>
+
+                    {/* Lista de Reseñas */}
+                    <div className="mb-6">
+                        {reviews.length === 0 ? (
+                            <p className="text-slate-500 text-center py-4">Este producto aún no tiene reseñas. ¡Sé el primero!</p>
+                        ) : (
+                            reviews.map(review => <ReviewItem key={review.id} review={review} />)
+                        )}
+                    </div>
+
+                    {/* Formulario de Reseña */}
+                    <ReviewForm 
+                        productoId={product.id} 
+                        user={user} 
+                        onReviewSubmitted={handleReviewSubmitted} 
+                    />
+                </div>
+
             </div>
-        </>
+        </div>
     );
 };
 
-export default DetalleCompra;
+export default DetalleProducto;
