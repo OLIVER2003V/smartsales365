@@ -1,12 +1,10 @@
 from rest_framework import serializers
 from django.db import transaction
-
-# --- ✨ 1. IMPORTACIONES CORREGIDAS ---
-# Garantia se importa desde .models (este directorio)
+from decimal import Decimal # <-- ✨ 1. IMPORTACIÓN AÑADIDA
 from .models import Venta, DetalleVenta, Garantia
-# Producto, Cliente, etc., se importan desde usuario.models
 from usuario.models import Producto, Cliente, Usuario, Rol
 from usuario.serializers import ClienteSerializer 
+from usuario.promocion_utils import get_precio_final # <-- ✨ 2. IMPORTACIÓN AÑADIDA
 
 # =========================================================
 # Serializers de Garantía (NECESARIOS PRIMERO)
@@ -17,8 +15,6 @@ class ProductoSimpleSerializer(serializers.ModelSerializer):
         fields = ['nombre', 'marca', 'modelo']
 
 class ClienteSimpleSerializer(serializers.ModelSerializer):
-    # ✨ CORRECCIÓN AQUÍ: 
-    # Tu modelo Cliente tiene 'email' directamente, no necesitamos 'source=user.email'
     class Meta:
         model = Cliente
         fields = ['email', 'nombre', 'apellido']
@@ -41,11 +37,6 @@ class GarantiaSerializer(serializers.ModelSerializer):
     Serializer para el admin (GestionGarantias) y para el cliente (DetalleCompra).
     Incluye los datos anidados que el frontend necesita para mostrar la info.
     """
-    # --- ✨ CORRECCIÓN AQUÍ ---
-    # Eliminamos la línea 'get_estado_display = ...'
-    # Solo necesitamos 'get_estado_display' en la lista 'fields' de la Meta.
-    # DRF lo encontrará automáticamente en el modelo.
-    
     detalle_venta = DetalleVentaSimpleSerializer(read_only=True)
     
     detalle_venta_producto_nombre = serializers.CharField(source='detalle_venta.producto.nombre', read_only=True)
@@ -86,7 +77,7 @@ class DetalleVentaSerializer(serializers.ModelSerializer):
 
 
 # =========================================================
-# Serializador para Venta (Tu código, ahora funciona)
+# Serializador para Venta (CON EL MÉTODO CREATE CORREGIDO)
 # =========================================================
 class VentaSerializer(serializers.ModelSerializer):
     # Esta línea AHORA usará el DetalleVentaSerializer corregido
@@ -123,7 +114,7 @@ class VentaSerializer(serializers.ModelSerializer):
 
     @transaction.atomic 
     def create(self, validated_data):
-        # ... (Tu lógica de create original va aquí) ...
+        # ... (Tu lógica de validación de cliente y vendedor) ...
         
         detalles_data = validated_data.pop('detalles')
         cliente_nuevo_data = validated_data.pop('cliente_nuevo', None)
@@ -174,8 +165,10 @@ class VentaSerializer(serializers.ModelSerializer):
         validated_data['cliente'] = cliente_final_para_venta
         cliente_obj = validated_data.pop('cliente')
         venta = Venta.objects.create(cliente=cliente_obj, **validated_data) 
+        
+        # --- ✨ INICIO DE LA CORRECCIÓN LÓGICA ---
 
-        venta_total = 0
+        venta_total = Decimal('0.00') # Usar Decimal para el total
         productos_para_actualizar_stock = [] 
 
         for i, detalle_info in enumerate(detalles_data):
@@ -186,24 +179,42 @@ class VentaSerializer(serializers.ModelSerializer):
                 if not isinstance(cantidad, int) or cantidad <= 0: raise ValueError("Cantidad inválida.")
                 if producto_obj.stock < cantidad: raise ValueError(f"Stock insuficiente para {producto_obj.nombre} ({producto_obj.stock} disp.)")
                 
-                productos_para_actualizar_stock.append({'producto': producto_obj, 'cantidad_vendida': cantidad})
-                venta_total += (cantidad * producto_obj.precio)
+                # ¡CAMBIO CLAVE! Obtenemos el precio con descuento
+                precio_final_unitario, _ = get_precio_final(producto_obj)
+                
+                productos_para_actualizar_stock.append({
+                    'producto': producto_obj, 
+                    'cantidad_vendida': cantidad,
+                    'precio_a_guardar': precio_final_unitario # Guardamos el precio correcto
+                })
+                
+                # Usamos el precio final para sumar al total
+                venta_total += (cantidad * precio_final_unitario) 
+            
             except (Producto.DoesNotExist, KeyError, ValueError, Exception) as e:
                 raise serializers.ValidationError({f"detalles[{i}]": f"Error procesando item: {e}"})
 
+        # Segundo bucle para crear detalles y actualizar stock
         for item in productos_para_actualizar_stock:
             producto_a_actualizar = item['producto']
             cantidad_vendida = item['cantidad_vendida']
+            # ¡CAMBIO CLAVE! Usamos el precio correcto guardado
+            precio_unitario_correcto = item['precio_a_guardar']
+            
             DetalleVenta.objects.create(
                 venta=venta,
                 producto=producto_a_actualizar,
                 cantidad=cantidad_vendida,
-                precio_unitario=producto_a_actualizar.precio
+                precio_unitario=precio_unitario_correcto # <-- Se guarda el precio con descuento
             )
+            # Actualizar stock
             producto_a_actualizar.stock -= cantidad_vendida
             producto_a_actualizar.save(update_fields=['stock'])
 
+        # Finalmente, actualizamos el total de la Venta
         venta.total = venta_total
         venta.save(update_fields=['total']) 
+
+        # --- ✨ FIN DE LA CORRECCIÓN LÓGICA ---
 
         return venta
