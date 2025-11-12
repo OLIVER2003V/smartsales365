@@ -1,45 +1,112 @@
-# ventas/serializers.py
 from rest_framework import serializers
-from .models import Venta, DetalleVenta
-from usuario.models import Producto, Cliente, Usuario, Rol
-from usuario.serializers import ClienteSerializer 
 from django.db import transaction
 
+# --- ✨ 1. IMPORTACIONES CORREGIDAS ---
+# Garantia se importa desde .models (este directorio)
+from .models import Venta, DetalleVenta, Garantia
+# Producto, Cliente, etc., se importan desde usuario.models
+from usuario.models import Producto, Cliente, Usuario, Rol
+from usuario.serializers import ClienteSerializer 
+
 # =========================================================
-# Serializador para DetalleVenta (Sin cambios)
+# Serializers de Garantía (NECESARIOS PRIMERO)
+# =========================================================
+class ProductoSimpleSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Producto
+        fields = ['nombre', 'marca', 'modelo']
+
+class ClienteSimpleSerializer(serializers.ModelSerializer):
+    # ✨ CORRECCIÓN AQUÍ: 
+    # Tu modelo Cliente tiene 'email' directamente, no necesitamos 'source=user.email'
+    class Meta:
+        model = Cliente
+        fields = ['email', 'nombre', 'apellido']
+
+class VentaSimpleSerializer(serializers.ModelSerializer):
+    cliente = ClienteSimpleSerializer(read_only=True)
+    class Meta:
+        model = Venta
+        fields = ['id', 'cliente']
+
+class DetalleVentaSimpleSerializer(serializers.ModelSerializer):
+    producto = ProductoSimpleSerializer(read_only=True)
+    venta = VentaSimpleSerializer(read_only=True)
+    class Meta:
+        model = DetalleVenta
+        fields = ['id', 'producto', 'venta']
+
+class GarantiaSerializer(serializers.ModelSerializer):
+    """
+    Serializer para el admin (GestionGarantias) y para el cliente (DetalleCompra).
+    Incluye los datos anidados que el frontend necesita para mostrar la info.
+    """
+    # --- ✨ CORRECCIÓN AQUÍ ---
+    # Eliminamos la línea 'get_estado_display = ...'
+    # Solo necesitamos 'get_estado_display' en la lista 'fields' de la Meta.
+    # DRF lo encontrará automáticamente en el modelo.
+    
+    detalle_venta = DetalleVentaSimpleSerializer(read_only=True)
+    
+    detalle_venta_producto_nombre = serializers.CharField(source='detalle_venta.producto.nombre', read_only=True)
+
+    class Meta:
+        model = Garantia
+        fields = [
+            'id', 
+            'detalle_venta', 
+            'codigo_garantia', 
+            'fecha_vencimiento', 
+            'estado', 
+            'get_estado_display', # <-- Dejarlo aquí es suficiente
+            'motivo_reclamo', 
+            'observacion_admin',
+            'detalle_venta_producto_nombre' 
+        ]
+
+# =========================================================
+# Serializador para DetalleVenta (¡CORREGIDO!)
 # =========================================================
 class DetalleVentaSerializer(serializers.ModelSerializer):
     producto = serializers.PrimaryKeyRelatedField(queryset=Producto.objects.all())
     nombre_producto = serializers.CharField(source='producto.nombre', read_only=True)
+    
+    # --- ✨ AÑADIDO ---
+    # Esto anidará la lista de garantías dentro de cada detalle
+    garantias = GarantiaSerializer(many=True, read_only=True)
 
     class Meta:
         model = DetalleVenta
-        fields = ['id', 'producto', 'nombre_producto', 'cantidad', 'precio_unitario', 'subtotal']
-        read_only_fields = ['subtotal', 'nombre_producto', 'precio_unitario']
+        # --- ✨ AÑADIDO ---
+        fields = [
+            'id', 'producto', 'nombre_producto', 'cantidad', 
+            'precio_unitario', 'subtotal', 'garantias' # <-- AÑADIDO
+        ]
+        read_only_fields = ['subtotal', 'nombre_producto', 'precio_unitario', 'garantias']
+
 
 # =========================================================
-# Serializador para Venta (Creación y Lectura)
+# Serializador para Venta (Tu código, ahora funciona)
 # =========================================================
 class VentaSerializer(serializers.ModelSerializer):
-    detalles = DetalleVentaSerializer(many=True)
+    # Esta línea AHORA usará el DetalleVentaSerializer corregido
+    detalles = DetalleVentaSerializer(many=True) 
+    
     cliente_info = serializers.SerializerMethodField(read_only=True)
     vendedor_username = serializers.CharField(source='vendedor.username', read_only=True, allow_null=True)
     cliente_nuevo = serializers.JSONField(write_only=True, required=False)
-    
-    # --- ¡CAMBIO AQUÍ! ---
-    # Añadimos get_estado_display para mostrar el texto legible del estado
     estado_display = serializers.CharField(source='get_estado_display', read_only=True)
-
+    
     class Meta:
         model = Venta
         fields = [
             'id', 'cliente', 'vendedor', 'fecha_venta', 'total', 'estado',
-            'estado_display', # <-- Añadido
-            'detalles', 'cliente_nuevo', 
+            'estado_display', 
+            'detalles', # <-- Este 'detalles' ahora contendrá las garantías
+            'cliente_nuevo', 
             'cliente_info', 'vendedor_username'
         ]
         read_only_fields = ['fecha_venta', 'total', 'estado', 'vendedor', 'cliente_info', 'vendedor_username', 'estado_display']
-        # 'cliente' es escribible si lo envía un Vendedor/Admin
 
     def get_cliente_info(self, obj):
         if obj.cliente:
@@ -49,8 +116,6 @@ class VentaSerializer(serializers.ModelSerializer):
                 'apellido': obj.cliente.apellido,
                 'email': obj.cliente.email,
                 'telefono': obj.cliente.telefono,
-                # --- ¡CAMBIO AQUÍ! ---
-                # Añadimos nit_ci y direccion para el comprobante
                 'nit_ci': obj.cliente.nit_ci,
                 'direccion': obj.cliente.direccion,
             }
@@ -58,6 +123,8 @@ class VentaSerializer(serializers.ModelSerializer):
 
     @transaction.atomic 
     def create(self, validated_data):
+        # ... (Tu lógica de create original va aquí) ...
+        
         detalles_data = validated_data.pop('detalles')
         cliente_nuevo_data = validated_data.pop('cliente_nuevo', None)
         cliente_existente_id = validated_data.get('cliente') 
@@ -86,7 +153,7 @@ class VentaSerializer(serializers.ModelSerializer):
                         email_nuevo = cliente_nuevo_data.get('email')
                         if not email_nuevo: raise serializers.ValidationError({"cliente_nuevo": "El email es requerido."})
                         if Cliente.objects.filter(email=email_nuevo).exists():
-                             raise serializers.ValidationError({"cliente_nuevo": {"email": f"El email '{email_nuevo}' ya está registrado."}})
+                                raise serializers.ValidationError({"cliente_nuevo": {"email": f"El email '{email_nuevo}' ya está registrado."}})
 
                         cliente_final_para_venta = Cliente.objects.create(
                             user=user, 
@@ -102,22 +169,17 @@ class VentaSerializer(serializers.ModelSerializer):
                 else:
                     raise serializers.ValidationError({"cliente": "Faltan datos del cliente."})
         else:
-             raise serializers.ValidationError({"cliente": "Se requiere un cliente o usuario autenticado."})
+            raise serializers.ValidationError({"cliente": "Se requiere un cliente o usuario autenticado."})
 
         validated_data['cliente'] = cliente_final_para_venta
-
-        # 3. Crear la Venta (El estado por defecto es PAGADO)
         cliente_obj = validated_data.pop('cliente')
-        # --- ¡CAMBIO AQUÍ! ---
-        # El estado por defecto del modelo (PAGADO) se usará automáticamente
         venta = Venta.objects.create(cliente=cliente_obj, **validated_data) 
-        # Ya no se pone PENDIENTE primero
 
         venta_total = 0
         productos_para_actualizar_stock = [] 
 
         for i, detalle_info in enumerate(detalles_data):
-             try:
+            try:
                 producto_id = detalle_info['producto'].id
                 producto_obj = Producto.objects.select_for_update().get(pk=producto_id)
                 cantidad = detalle_info['cantidad']
@@ -126,8 +188,8 @@ class VentaSerializer(serializers.ModelSerializer):
                 
                 productos_para_actualizar_stock.append({'producto': producto_obj, 'cantidad_vendida': cantidad})
                 venta_total += (cantidad * producto_obj.precio)
-             except (Producto.DoesNotExist, KeyError, ValueError, Exception) as e:
-                 raise serializers.ValidationError({f"detalles[{i}]": f"Error procesando item: {e}"})
+            except (Producto.DoesNotExist, KeyError, ValueError, Exception) as e:
+                raise serializers.ValidationError({f"detalles[{i}]": f"Error procesando item: {e}"})
 
         for item in productos_para_actualizar_stock:
             producto_a_actualizar = item['producto']
@@ -141,11 +203,7 @@ class VentaSerializer(serializers.ModelSerializer):
             producto_a_actualizar.stock -= cantidad_vendida
             producto_a_actualizar.save(update_fields=['stock'])
 
-        # 6. Finalizar la Venta
         venta.total = venta_total
-        # --- ¡CAMBIO AQUÍ! ---
-        # El estado ya está en PAGADO (default), solo guardamos el total.
         venta.save(update_fields=['total']) 
 
         return venta
-    

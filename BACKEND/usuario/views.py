@@ -13,12 +13,15 @@ from django.contrib.auth import password_validation
 from django.core.exceptions import ValidationError
 from django.utils.encoding import force_str
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes
 import openpyxl
 from .permissions import IsAdminOrVendedor, IsAdminUser, IsOwnerOrAdmin
 from django.shortcuts import get_object_or_404
 from rest_framework.exceptions import NotFound, ValidationError
 from .command_parser import parsear_comando_carrito, buscar_producto_por_terminos
+
+from firebase_admin.messaging import Message, Notification
+from fcm_django.models import FCMDevice
 
 # Vista para permitir el registro de nuevos usuarios (por defecto, Clientes)
 class UsuarioRegisterView(generics.CreateAPIView):
@@ -553,14 +556,55 @@ class PromocionViewSet(viewsets.ModelViewSet):
     """
     ViewSet para que el Administrador/Vendedor gestione (CRUD) 
     las promociones y ofertas.
+    ¡AHORA NOTIFICA AL CREAR!
     """
     queryset = Promocion.objects.all().order_by('-activo', '-fecha_fin')
     serializer_class = PromocionSerializer
-    permission_classes = [IsAdminOrVendedor] # Solo Admins y Vendedores
+    permission_classes = [IsAdminOrVendedor]
     
-    # Opcional: añadir filtros
     filter_backends = [filters.SearchFilter]
     search_fields = ['nombre']
+    
+    # --- ¡MÉTODO 'CREATE' SOBREESCRITO! ---
+    def create(self, request, *args, **kwargs):
+        # 1. Primero, dejamos que el serializer cree la promoción
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        
+        # 2. Obtenemos la promoción recién creada
+        promocion = serializer.instance 
+        
+        # 3. ¡Enviamos la notificación a TODOS!
+        try:
+            # Buscamos TODOS los dispositivos activos
+            all_active_devices = FCMDevice.objects.filter(active=True)
+            
+            title = "¡Nueva Promoción! 🥳"
+            # Tomamos solo los primeros 100 caracteres de la descripción
+            body = f"¡Aprovecha! {promocion.nombre}: {promocion.descripcion[:100]}..." 
+            
+            msg = Message(
+                notification=Notification(title=title, body=body),
+                data={
+                    "screen": "/promociones", # Ruta genérica de promociones
+                    "promocion_id": str(promocion.id)
+                }
+            )
+            
+            # ¡Enviamos a todos!
+            all_active_devices.send_message(msg)
+            
+            print(f"Notificación de promoción '{promocion.nombre}' enviada a TODOS los dispositivos activos.")
+
+        except Exception as e:
+            print(f"ERROR al enviar notificación de promoción masiva: {str(e)}")
+            # No detenemos la creación si la notificación falla
+            pass
+
+        # 4. Devolvemos la respuesta estándar de creación
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
     
 class ResenaViewSet(viewsets.ModelViewSet):
     """
@@ -609,3 +653,33 @@ class FavoritoViewSet(viewsets.ReadOnlyModelViewSet):
         del usuario que hace la petición.
         """
         return Favorito.objects.filter(usuario=self.request.user).select_related('producto')
+    
+    
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def register_fcm_device(request):
+    """
+    Registra o actualiza un dispositivo FCM para el usuario autenticado.
+    El body debe ser: { "registration_id": "el_token_del_dispositivo" }
+    """
+    user = request.user
+    registration_id = request.data.get("registration_id")
+
+    if not registration_id:
+        return Response({"error": "registration_id es requerido"}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Desactiva todos los dispositivos viejos para este usuario
+    FCMDevice.objects.filter(user=user).update(active=False)
+
+    # Crea o actualiza el nuevo dispositivo
+    device, created = FCMDevice.objects.get_or_create(
+        user=user,
+        registration_id=registration_id,
+    )
+
+    # Asegúrate de que esté activo
+    if not device.active:
+        device.active = True
+        device.save()
+
+    return Response({"success": "Dispositivo registrado/actualizado"})

@@ -87,19 +87,25 @@ class Garantia(models.Model):
     """
     Registra una garantía única para una UNIDAD de un producto vendido.
     Si un DetalleVenta tiene cantidad=5, se crearán 5 de estos objetos.
+    Ahora incluye campos para el proceso de reclamo.
     """
+    
+    # --- ¡CAMBIO AQUÍ! (Estados ampliados) ---
     class EstadoGarantia(models.TextChoices):
         ACTIVA = 'ACT', 'Activa'
+        EN_RECLAMO = 'REC', 'Reclamo Iniciado' # Cliente inició el reclamo
+        EN_REVISION = 'REV', 'En Revisión'     # Admin recibió/recepcionó el producto
+        APROBADA = 'APR', 'Aprobada'        # Admin aprobó (reparación/reemplazo)
+        RECHAZADA = 'RZD', 'Rechazada'      # Admin rechazó el reclamo
         EXPIRADA = 'EXP', 'Expirada'
-        RECLAMADA = 'REC', 'Reclamada' # Se usó la garantía
 
-    # Vincula a la línea de pedido específica
+    # Vincula a la línea de pedido específica (Sin cambios)
     detalle_venta = models.ForeignKey(
         DetalleVenta,
         on_delete=models.CASCADE,
-        related_name='garantias' # Permite detalle.garantias.all()
+        related_name='garantias'
     )
-    # Código único para que el cliente consulte (CU17)
+    # Código único para que el cliente consulte (Sin cambios)
     codigo_garantia = models.UUIDField(
         default=uuid.uuid4,
         editable=False,
@@ -107,14 +113,32 @@ class Garantia(models.Model):
         db_index=True
     )
     fecha_vencimiento = models.DateField()
+    
+    # Estado (ahora usa los nuevos choices)
     estado = models.CharField(
         max_length=3,
         choices=EstadoGarantia.choices,
         default=EstadoGarantia.ACTIVA
     )
     
+    # --- ¡NUEVOS CAMPOS! ---
+    # Para que el cliente explique el problema al reclamar
+    motivo_reclamo = models.TextField(
+        blank=True, 
+        null=True, 
+        help_text="Descripción del cliente sobre la falla"
+    )
+    # Para que el admin justifique su decisión (aceptar, recepcionar, rechazar)
+    observacion_admin = models.TextField(
+        blank=True, 
+        null=True, 
+        help_text="Notas del administrador sobre la revisión o rechazo"
+    )
+    
+    # --- ¡CAMBIO AQUÍ! (String mejorado) ---
     def __str__(self):
-        return f"Garantía {str(self.codigo_garantia)[:8]}... (Vence: {self.fecha_vencimiento})"
+        # Muestra el estado actual, que es más útil
+        return f"Garantía {str(self.codigo_garantia)[:8]}... ({self.get_estado_display()})"
     
     class Meta:
         verbose_name = 'Garantía de Producto'

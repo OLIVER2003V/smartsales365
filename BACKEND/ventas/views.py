@@ -4,7 +4,7 @@ from rest_framework.views import APIView
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from .models import Venta, DetalleVenta, Producto, Garantia
-from .serializers import VentaSerializer
+from .serializers import VentaSerializer, GarantiaSerializer
 from usuario.permissions import IsAdminOrVendedor
 import stripe
 from django.conf import settings
@@ -15,6 +15,8 @@ from .pdf_utils import generar_comprobante_pdf
 from django.core.exceptions import ValidationError # <-- 1. Importar ValidationError
 from usuario.promocion_utils import get_precio_final 
 from decimal import Decimal
+from fcm_django.models import FCMDevice
+from firebase_admin.messaging import Message, Notification
 # =========================================================
 # VISTAS DE VENTAS
 # =========================================================
@@ -59,16 +61,59 @@ class VentaViewSet(viewsets.ModelViewSet):
         """ (CU18) Permite a un Admin/Vendedor actualizar el estado de un pedido. """
         venta = self.get_object()
         nuevo_estado = request.data.get('estado')
+
         if not nuevo_estado:
             return Response({"error": "Se requiere el campo 'estado'."}, status=status.HTTP_400_BAD_REQUEST)
+        
         valid_states = [choice[0] for choice in Venta.EstadoVenta.choices]
         if nuevo_estado not in valid_states:
             return Response({"error": f"Estado '{nuevo_estado}' no es válido."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # 1. Guarda el estado
         try:
             venta.estado = nuevo_estado
             venta.save(update_fields=['estado'])
+        
+        # ------ 🚀 INICIO DE LA LÓGICA DE NOTIFICACIÓN ------
+        
+            estados_notificables = ['ENT', 'OK', 'CAN'] 
+            
+            if nuevo_estado in estados_notificables:
+                try:
+                    if venta.cliente and venta.cliente.user:
+                        user = venta.cliente.user
+                        devices = FCMDevice.objects.filter(user=user, active=True)
+                        
+                        # ❗️ 2. CONSTRUYE LOS OBJETOS DE MENSAJE Y NOTIFICACIÓN
+                        title = "Tu pedido se actualizó"
+                        body = f"Tu pedido #{venta.id} ahora está: {venta.get_estado_display()}" 
+                        data_message = {
+                            "screen": f"/mis-compras/{venta.id}"
+                        }
+
+                        # Crea el objeto de notificación (lo que ve el usuario)
+                        notif_obj = Notification(title=title, body=body)
+
+                        # Crea el mensaje completo (notificación + datos)
+                        msg = Message(
+                            notification=notif_obj,
+                            data=data_message
+                        )
+                        
+                        # ❗️ 3. ENVÍA EL OBJETO 'msg'
+                        # (La función se llama 'send_message', y le pasamos 'msg')
+                        devices.send_message(msg) 
+                        
+                        print(f"Notificación enviada a {user.email} por Venta {venta.id}")
+
+                except Exception as e:
+                    print(f"ERROR al enviar notificación FCM: {str(e)}")
+        
+        # ------ FIN DE LA LÓGICA DE NOTIFICACIÓN --------
+
             serializer = self.get_serializer(venta)
             return Response(serializer.data, status=status.HTTP_200_OK)
+        
         except Exception as e:
             return Response({"error": f"Error al actualizar: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -224,3 +269,132 @@ class ConsultarGarantiaView(APIView):
         except Exception as e:
             return Response({"error": f"Error inesperado: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
+class IniciarReclamoGarantiaView(APIView):
+    """
+    (Cliente) POST /api/garantias/<id_garantia>/reclamar/
+    Permite a un cliente iniciar un reclamo sobre una garantía que le pertenece.
+    """
+    permission_classes = [permissions.IsAuthenticated] # Asumimos IsCliente
+
+    def post(self, request, garantia_id):
+        try:
+            garantia = Garantia.objects.get(
+                pk=garantia_id, 
+                detalle_venta__venta__cliente=request.user.cliente_profile
+            )
+        except (Garantia.DoesNotExist, AttributeError):
+            return Response({"error": "Garantía no encontrada o no le pertenece."}, status=status.HTTP_404_NOT_FOUND)
+
+        motivo = request.data.get('motivo_reclamo', '')
+        if not motivo:
+            return Response({"error": "Debe proporcionar un motivo del reclamo."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Validar estado
+        if garantia.estado != Garantia.EstadoGarantia.ACTIVA:
+            return Response({"error": f"Esta garantía no está activa (Estado: {garantia.get_estado_display()})."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Actualizar
+        garantia.estado = Garantia.EstadoGarantia.EN_RECLAMO
+        garantia.motivo_reclamo = motivo
+        garantia.save()
+        
+        # (Aquí podrías notificar al admin)
+        
+        return Response({"status": "Reclamo iniciado con éxito"}, status=status.HTTP_200_OK)
+
+class GarantiaViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    ViewSet para que el Admin/Vendedor pueda VER la lista de garantías
+    y consultar reclamos.
+    (Provee /api/garantias/ y /api/garantias/<pk>/)
+    """
+    serializer_class = GarantiaSerializer
+    permission_classes = [IsAdminOrVendedor] # Solo admin/vendedor pueden ver la lista
+
+    def get_queryset(self):
+        """
+        Optimiza la consulta para incluir los datos anidados
+        que el serializer (y el frontend) necesita.
+        """
+        return Garantia.objects.all().select_related(
+            'detalle_venta__producto',
+            'detalle_venta__venta__cliente',
+            'detalle_venta__venta__cliente__user' # Asegura que el email esté
+        ).order_by('-detalle_venta__venta__fecha_venta') # Más recientes primero
+
+
+class GestionarGarantiaView(APIView):
+    """
+    (Admin) PATCH /api/garantias/<id_garantia>/gestionar/
+    Permite a un Admin/Vendedor actualizar el estado de un reclamo.
+    """
+    permission_classes = [IsAdminOrVendedor]
+
+    def patch(self, request, garantia_id):
+        try:
+            # Usamos select_related para optimizar la consulta
+            garantia = Garantia.objects.select_related(
+                'detalle_venta__venta__cliente__user',
+                'detalle_venta__producto'
+            ).get(pk=garantia_id)
+        except Garantia.DoesNotExist:
+            return Response({"error": "Garantía no encontrada."}, status=status.HTTP_404_NOT_FOUND)
+
+        nuevo_estado = request.data.get('estado')
+        observacion = request.data.get('observacion_admin', None)
+
+        # --- ✨ CORRECCIÓN AQUÍ ---
+        # Validamos contra los valores reales del enum (los códigos cortos)
+        # El frontend envía: 'REC', 'REV', 'APR', 'RZD'.
+        estados_validos_admin = [
+            Garantia.EstadoGarantia.EN_RECLAMO,  # 'REC'
+            Garantia.EstadoGarantia.EN_REVISION, # 'REV'
+            Garantia.EstadoGarantia.APROBADA,    # 'APR'
+            Garantia.EstadoGarantia.RECHAZADA    # 'RZD'
+        ]
+        
+        # Ahora comparamos 'REV' (del request) contra ['REC', 'REV', 'APR', 'RZD']
+        if nuevo_estado not in estados_validos_admin:
+            return Response({"error": "Estado no válido para esta acción."}, status=status.HTTP_400_BAD_REQUEST)
+        # --- FIN DE LA CORRECCIÓN ---
+
+        # Esta validación ya era correcta (compara 'RZD' == 'RZD')
+        if nuevo_estado == Garantia.EstadoGarantia.RECHAZADA and not observacion:
+            return Response({"error": "Se requiere una observación para rechazar la garantía."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Actualizar
+        garantia.estado = nuevo_estado
+        if observacion:
+            garantia.observacion_admin = observacion
+        garantia.save()
+        
+        # ------ 🚀 INICIO DE LA LÓGICA DE NOTIFICACIÓN (AÑADIDA) ------
+        try:
+            # 1. Encontrar al usuario dueño de la garantía
+            cliente = garantia.detalle_venta.venta.cliente
+            if cliente and cliente.user:
+                user = cliente.user
+                devices = FCMDevice.objects.filter(user=user, active=True)
+                
+                # 2. Preparar el mensaje
+                title = "Actualización de tu Garantía"
+                body = f"Tu reclamo ({garantia.detalle_venta.producto.nombre}) ahora está: {garantia.get_estado_display()}"
+                
+                msg = Message(
+                    notification=Notification(title=title, body=body),
+                    data={
+                        "screen": "/mis-garantias", # O la ruta en la app móvil
+                        "garantia_id": str(garantia.id)
+                    }
+                )
+                
+                # 3. Enviar
+                devices.send_message(msg)
+                print(f"Notificación de garantía enviada a {user.email}")
+                
+        except Exception as e:
+            print(f"ERROR al enviar notificación FCM de garantía: {str(e)}")
+        # ------ FIN DE LA LÓGICA DE NOTIFICACIÓN --------
+        
+        return Response({"status": f"Garantía actualizada a: {garantia.get_estado_display()}"}, status=status.HTTP_200_OK)
+    

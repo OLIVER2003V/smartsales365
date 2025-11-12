@@ -1,6 +1,8 @@
-# settings.py
+# config/settings.py
 import os
 from pathlib import Path
+import firebase_admin  # <--- ❗️ AÑADE ESTA LÍNEA
+from firebase_admin import credentials
 # from decouple import config # Comentado
 from decouple import Config, RepositoryEnv # Importa clases específicas
 import cloudinary
@@ -15,6 +17,33 @@ DOTENV_FILE = BASE_DIR / '.env'
 env_config = Config(RepositoryEnv(DOTENV_FILE))
 # Usa env_config en lugar de config de ahora en adelante
 # ----------------------------------
+
+# ----------------------------------------------------
+# ❗️❗️ MUEVE LA CONFIGURACIÓN DE FIREBASE AQUÍ ❗️❗️
+# (Debe estar ANTES de INSTALLED_APPS)
+# ----------------------------------------------------
+FIREBASE_CREDS_PATH = os.path.join(BASE_DIR, "firebase-service-account.json")
+
+try:
+    # Intenta obtener la app 'default'
+    # Esto es para evitar crashearse cuando el 'StatReloader' reinicia el servidor
+    firebase_admin.get_app()
+    print("La app de Firebase ya estaba inicializada.")
+except ValueError:
+    # Si la app no existe (ValueError), la inicializamos
+    try:
+        if os.path.exists(FIREBASE_CREDS_PATH):
+            cred = credentials.Certificate(FIREBASE_CREDS_PATH)
+            firebase_admin.initialize_app(cred)
+            print(f"Firebase app inicializada exitosamente con: {FIREBASE_CREDS_PATH}")
+        else:
+            print(f"ADVERTENCIA: ¡El archivo de credenciales de Firebase no se encontró!")
+            print(f"Ruta buscada: {FIREBASE_CREDS_PATH}")
+
+    except Exception as e:
+        print(f"ERROR CRÍTICO: No se pudo inicializar Firebase Admin: {e}")
+# ----------------------------------------------------
+# ----------------------------------------------------
 
 
 # Quick-start development settings - unsuitable for production
@@ -50,6 +79,7 @@ INSTALLED_APPS = [
     'ventas',
     'reportes',
     'analitica',
+    'fcm_django', # <-- Ahora, cuando Django lea esto, las credenciales YA estarán cargadas
 ]
 
 MIDDLEWARE = [
@@ -127,7 +157,7 @@ REST_FRAMEWORK = {
 }
 
 # CORS
-CORS_ALLOWED_ORIGINS_STRING = env_config('CORS_ALLOWED_ORIGINS', default='http://localhost:5173')
+CORS_ALLOWED_ORIGINS_STRING = env_config('CORS_ALLOWED_ORIGINS', default='http://localhost:5173,http://localhost:4173')
 CORS_ALLOWED_ORIGINS = [origin.strip() for origin in CORS_ALLOWED_ORIGINS_STRING.split(',') if origin.strip()]
 # Asegúrate de que no haya otra definición de ALLOWED_HOSTS aquí abajo
 
@@ -152,3 +182,6 @@ stripe.api_key = STRIPE_SECRET_KEY
 GEMINI_API_KEY = env_config('GEMINI_API_KEY', default=None)
 if not GEMINI_API_KEY:
     print("ADVERTENCIA: GEMINI_API_KEY no encontrada en .env. La IA no funcionará.")
+    
+# ❗️❗️ ESTE BLOQUE SE MOVIÓ ARRIBA (antes de INSTALLED_APPS)
+# (Lo dejo vacío aquí para que sepas que ya no va al final)
