@@ -1,6 +1,6 @@
 # usuario/urls.py
 from django.urls import path
-from .views import UsuarioRegisterView, UserLogoutView, UserProfileView, PasswordResetRequestView, PasswordResetConfirmView, ProductoViewSet, ClienteViewSet, PasswordChangeView, UsuarioAdminViewSet, CategoriaViewSet, CarritoViewSet, PromocionViewSet, ResenaViewSet, FavoritoViewSet, register_fcm_device, 
+from .views import UsuarioRegisterView, UserLogoutView, UserProfileView, PasswordResetRequestView, PasswordResetConfirmView, ProductoViewSet, ClienteViewSet, PasswordChangeView, UsuarioAdminViewSet, CategoriaViewSet, CarritoViewSet, PromocionViewSet, ResenaViewSet, FavoritoViewSet, register_fcm_device
 from rest_framework.routers import DefaultRouter
 # Crea un router
 router = DefaultRouter()
