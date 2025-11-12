@@ -17,17 +17,14 @@ def seed_ventas_ia(cantidad_a_crear=365):
     # 1. Obtener recursos necesarios (Productos, Clientes, Vendedores)
     productos = list(Producto.objects.filter(stock__gt=0))
     clientes = list(Cliente.objects.all())
-    # Filtramos por rol VEN, pero la lista PUEDE estar vacía
+    # Filtramos por rol VEN
     vendedores = list(Usuario.objects.filter(rol=Rol.VENDEDOR))
 
-    # --- ✨ CORRECCIÓN DE VERIFICACIÓN ---
-    # Si alguna lista crucial está vacía, lanzamos una excepción clara.
+    # --- CORRECCIÓN DE VERIFICACIÓN ---
     if not productos:
-        raise Exception("Faltan recursos: ¡No hay PRODUCTOS con stock en la base de datos!")
+        raise Exception("Faltan recursos: ¡No hay PRODUCTOS con stock en la base de datos! Carga el excel primero.")
     if not clientes:
-        raise Exception("Faltan recursos: ¡No hay CLIENTES en la base de datos!")
-    # Nota: Si no hay vendedores, 'vendedor_aleatorio' será None, lo cual es permitido 
-    #       en tu Venta.objects.create (null=True).
+        raise Exception("Faltan recursos: ¡No hay CLIENTES en la base de datos! Crea un usuario cliente.")
     # --- FIN DE CORRECCIÓN ---
     
     created_count = 0
@@ -42,7 +39,7 @@ def seed_ventas_ia(cantidad_a_crear=365):
             
             # 2. Seleccionar Cliente y Vendedor aleatorio
             cliente_aleatorio = random.choice(clientes)
-            # ⚠️ Si la lista está vacía, asigna None. NO falla.
+            # Si la lista está vacía, asigna None.
             vendedor_aleatorio = random.choice(vendedores) if vendedores else None 
 
             # Simular fechas aleatorias en los últimos 2 años (730 días)
@@ -53,7 +50,6 @@ def seed_ventas_ia(cantidad_a_crear=365):
             venta = Venta.objects.create(
                 cliente=cliente_aleatorio,
                 vendedor=vendedor_aleatorio,
-                # 🔴 Usamos el estado correcto 'ENTREGADO' ('OK')
                 estado=Venta.EstadoVenta.ENTREGADO, 
                 total=Decimal('0.00') 
             )
@@ -67,9 +63,8 @@ def seed_ventas_ia(cantidad_a_crear=365):
             venta_total_calculado = Decimal('0.00')
             productos_usados = set() 
 
-            # Usamos un bucle protegido para la creación de detalles
             for _ in range(num_items):
-                try:
+                try: # <-- El try/except interno debe ir aquí, dentro del bucle de items
                     producto_aleatorio = random.choice(productos)
                     if producto_aleatorio.id in productos_usados:
                         continue 
@@ -96,8 +91,9 @@ def seed_ventas_ia(cantidad_a_crear=365):
                     producto_aleatorio.save(update_fields=['stock']) 
                 
                 except Exception as detail_error:
-                    # Captura errores internos del detalle (raro, pero seguro)
-                    print(f"Error interno en detalle de venta: {detail_error}")
+                    # Si falla un detalle (ej. problema de stock en la BD), lo saltamos
+                    print(f"Error interno en detalle de venta para venta #{venta.id}: {detail_error}")
+                    continue 
                     
             # 6. Actualizar el Total de la Venta
             if venta_total_calculado > 0:

@@ -19,7 +19,7 @@ from .permissions import IsAdminOrVendedor, IsAdminUser, IsOwnerOrAdmin
 from django.shortcuts import get_object_or_404
 from rest_framework.exceptions import NotFound, ValidationError
 from .command_parser import parsear_comando_carrito, buscar_producto_por_terminos
-
+from .data_seeder import seed_ventas_ia 
 from firebase_admin.messaging import Message, Notification
 from fcm_django.models import FCMDevice
 
@@ -683,3 +683,47 @@ def register_fcm_device(request):
         device.save()
 
     return Response({"success": "Dispositivo registrado/actualizado"})
+
+
+
+class InitializeIADataView(APIView):
+    """
+    🔴 VISTA TEMPORAL para generar datos de venta masivos en producción (Render).
+    DEBE SER ELIMINADA TRAS SU USO.
+    """
+    # Usaremos IsAdminUser o lo dejamos en IsAdminOrVendedor.
+    # Si quieres ejecutarlo desde el navegador sin token, cámbialo a AllowAny temporalmente.
+    permission_classes = [permissions.IsAdminUser] 
+    
+    def post(self, request):
+        try:
+            # Puedes pasar 'cantidad' en el cuerpo del POST request
+            cantidad = int(request.data.get('cantidad', 365))
+            if cantidad > 5000:
+                 return Response({"error": "Límite de 5000 ventas para evitar sobrecarga."}, status=status.HTTP_400_BAD_REQUEST)
+            
+            # --- VALIDACIÓN CRUCIAL DE RECURSOS ---# Importamos localmente para evitar errores circulares
+            if not Producto.objects.filter(stock__gt=0).exists() or not Cliente.objects.exists():
+                 return Response({"error": "Fallo de Recursos: Asegúrate de cargar Productos y Clientes primero."}, status=status.HTTP_400_BAD_REQUEST)
+
+            # --- LLAMADA A LA LÓGICA DEL SEEDER ---
+            # Asumiendo que 'seed_ventas_ia' está disponible en '.data_seeder'
+ 
+            created_count = seed_ventas_ia(cantidad)
+            
+            # Forzamos el entrenamiento del modelo después de crear datos
+            try:
+                 # Esta importación es dinámica porque 'analitica' no es una app base
+                 from analitica.ml_service import train_sales_model
+                 train_sales_model()
+            except ImportError:
+                 return Response({
+                    "success": f"Creadas {created_count} ventas, pero el servicio ML no se encontró. Entrena manualmente."
+                 }, status=status.HTTP_201_CREATED)
+            
+            return Response({
+                "success": f"Proceso completado. Creadas {created_count} ventas históricas. Modelo IA re-entrenado."
+            }, status=status.HTTP_201_CREATED)
+        
+        except Exception as e:
+            return Response({"error": f"Error al inicializar datos: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
