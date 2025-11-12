@@ -96,8 +96,9 @@ def seed_ventas_ia(cantidad_a_crear=365):
                     productos_usados.add(producto_aleatorio.id)
                     
                     # (Opcional) Descontar stock
-                    producto_aleatorio.stock -= cantidad_comprada
-                    producto_aleatorio.save(update_fields=['stock']) 
+                    #producto_aleatorio.stock -= cantidad_comprada
+                    
+                    #producto_aleatorio.save(update_fields=['stock']) 
                 
                 if venta_total_calculado > 0:
                     venta.total = venta_total_calculado
