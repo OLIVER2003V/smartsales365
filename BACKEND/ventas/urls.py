@@ -17,5 +17,6 @@ urlpatterns = [
     
     # 3. Gestionar Reclamo (Admin)
     path('garantias/<int:garantia_id>/gestionar/', GestionarGarantiaView.as_view(), name='gestionar-reclamo-garantia'),
-    path('ventas/run-populate/', RunPopulateView.as_view(), name='run-populate'),
+    path('run-populate/', RunPopulateView.as_view(), name='populate-ventas'),
+
 ]
