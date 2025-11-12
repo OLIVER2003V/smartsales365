@@ -1,19 +1,15 @@
 // src/App.jsx
 import React from 'react';
-// 1. Quita BrowserRouter de aquí
 import { Routes, Route, Link, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
-
-// 2. Importa el hook useAuth
 import { useAuth } from './context/AuthContext'; 
 
-// ... (Todos tus imports: LoginRegister, Profile, Navbar, etc.)
+// --- Imports (Asegúrate de tenerlos todos) ---
 import LoginRegister from './login/Login';
 import Register from './login/Register';
 import ForgotPassword from './login/ForgotPassword';
 import PasswordResetConfirm from './login/PasswordResetConfirm';
 import Profile from './login/Profile';
-// 3. ¡ProtectedRoute AHORA ES MÁS SIMPLE! (Lo veremos abajo)
 import ProtectedRoute from './login/ProtectedRoute'; 
 import AdministrarProducto from './productos/AdministrarProducto';
 import Navbar from './components/Navbar';
@@ -38,17 +34,13 @@ import GestionResenas from './admin/GestionResenas';
 import DetalleCompra from './cliente/DetalleCompra';
 import DetalleProducto from './cliente/DetalleProducto';
 import Favoritos from './cliente/Favoritos';
+
+// --- ✨ AÑADIR ESTE IMPORT ---
+import GestionGarantias from './admin/GestionGarantia';
+
 function App() {
-    // 4. Obtenemos el estado de autenticación DIRECTAMENTE del contexto
-    //    El 'user' ya contiene el 'rol' (ej: user.rol)
-    //    'isLoading' nos lo da AuthContext
     const { user, isAuthenticated, isLoading } = useAuth(); 
     
-    // 5. El useEffect, useState de token, etc., desaparecen.
-    //    AuthContext se encarga de todo eso.
-
-    // 6. Si AuthContext sigue cargando, muestra un spinner
-    //    (Evita que las rutas se rendericen antes de saber si hay usuario)
     if (isLoading) {
         return (
             <div className="flex justify-center items-center h-screen">
@@ -57,76 +49,66 @@ function App() {
         );
     }
 
-    // 7. El BrowserRouter ya NO está aquí. Está en main.jsx
     return (
         <>
-            {/* Toaster se queda aquí (o en main.jsx, ambos funcionan) */}
             <Toaster position="top-center" reverseOrder={false} />
-            
-            {/* El Navbar ahora puede usar useAuth() internamente */}
             <Navbar /> 
 
-            <main className="pt-16">
+            <main className="pt-16"> {/* Asumiendo que pt-16 es la altura de tu Navbar */}
                 <Routes>
-                    {/* --- RUTAS PÚBLICAS (ANTI-BUCLE) --- */}
+                    {/* --- RUTAS PÚBLICAS (Sin cambios) --- */}
                     <Route 
                         path="/" 
-                        element={
-                            !isAuthenticated ? <Navigate to="/login" replace /> : <Navigate to="/catalogo" replace />
-                        } 
+                        element={!isAuthenticated ? <Navigate to="/login" replace /> : <Navigate to="/catalogo" replace />} 
                     />
                     <Route 
                         path="/login" 
-                        element={
-                            !isAuthenticated ? <LoginRegister /> : <Navigate to="/catalogo" replace />
-                        } 
+                        element={!isAuthenticated ? <LoginRegister /> : <Navigate to="/catalogo" replace />} 
                     />
                     <Route 
                         path="/register" 
-                        element={
-                            !isAuthenticated ? <Register /> : <Navigate to="/catalogo" replace />
-                        } 
+                        element={!isAuthenticated ? <Register /> : <Navigate to="/catalogo" replace />} 
                     />
                     <Route 
                         path="/forgot-password" 
-                        element={
-                            !isAuthenticated ? <ForgotPassword /> : <Navigate to="/catalogo" replace />
-                        } 
+                        element={!isAuthenticated ? <ForgotPassword /> : <Navigate to="/catalogo" replace />} 
                     />
                     <Route 
                         path="/reset-password/:uid/:token" 
-                        element={
-                            !isAuthenticated ? <PasswordResetConfirm /> : <Navigate to="/catalogo" replace />
-                        } 
+                        element={!isAuthenticated ? <PasswordResetConfirm /> : <Navigate to="/catalogo" replace />} 
                     />
                     
                     {/* --- RUTAS PROTEGIDAS (COMUNES) --- */}
-                    {/* 8. Fíjate qué limpio. No más "token={token}" */}
                     <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
                     <Route path="/catalogo" element={<ProtectedRoute><ProductCatalog /></ProtectedRoute>} />
+                    <Route path="/producto/:id" element={<ProtectedRoute><DetalleProducto /></ProtectedRoute>} />
                     <Route path="/carrito" element={<ProtectedRoute><ShoppingCart /></ProtectedRoute>} />
                     <Route path="/checkout" element={<ProtectedRoute><CheckoutPage /></ProtectedRoute>} />
-                    <Route path="/historial-ventas" element={<ProtectedRoute><HistorialVentas /></ProtectedRoute>} />
                     <Route path="/pago-exitoso/:ventaId" element={<ProtectedRoute><PagoExitoso /></ProtectedRoute>} />
                     <Route path="/mis-compras" element={<ProtectedRoute><HistorialCompras /></ProtectedRoute>} />
                     <Route path="/mis-compras/:ventaId" element={<ProtectedRoute><DetalleCompra /></ProtectedRoute>} />
+                    <Route path="/favoritos" element={<ProtectedRoute><Favoritos /></ProtectedRoute>} />
+
+                    {/* Rutas Públicas (Garantía) - Cualquiera puede verlas */}
                     <Route path="/consultar-garantia" element={<ConsultarGarantia />} />
                     <Route path="/reglas-garantia" element={<ReglasGarantia />} />
-                    <Route path="/producto/:id" element={<DetalleProducto />} />
-                    <Route path="/favoritos" element={<Favoritos />} />
+
                     {/* --- RUTAS CONDICIONALES (ADMIN/VENDEDOR) --- */}
-                    {/* 9. Usamos 'user.rol' que viene del contexto */}
                     {(user?.rol === 'ADM' || user?.rol === 'VEN') && (
                         <>
+                            <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
+                            <Route path="/pedidos" element={<ProtectedRoute><GestionPedidos /></ProtectedRoute>} />
+                            <Route path="/historial-ventas" element={<ProtectedRoute><HistorialVentas /></ProtectedRoute>} />
                             <Route path="/productos" element={<ProtectedRoute><AdministrarProducto /></ProtectedRoute>} />
+                            <Route path="/categorias" element={<ProtectedRoute><GestionCategorias /></ProtectedRoute>} />
+                            <Route path="/admin/promociones" element={<ProtectedRoute><GestionPromociones /></ProtectedRoute>} />
                             <Route path="/clientes" element={<ProtectedRoute><AdministrarCliente /></ProtectedRoute>} />
+                            <Route path="/admin/resenas" element={<ProtectedRoute><GestionResenas /></ProtectedRoute>} />
                             <Route path="/pos" element={<ProtectedRoute><PuntoDeVenta /></ProtectedRoute>} />
                             <Route path="/reportes" element={<ProtectedRoute><GeneradorReportes /></ProtectedRoute>} />
-                            <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
-                            <Route path="/categorias" element={<ProtectedRoute><GestionCategorias /></ProtectedRoute>} />
-                            <Route path="/pedidos" element={<ProtectedRoute><GestionPedidos /></ProtectedRoute>} />
-                            <Route path="/admin/promociones" element={<ProtectedRoute><GestionPromociones /></ProtectedRoute>} />
-                            <Route path="/admin/resenas" element={<ProtectedRoute><GestionResenas /></ProtectedRoute>} />
+
+                            {/* ✨ AÑADIR ESTA LÍNEA */}
+                            <Route path="/admin/garantias" element={<ProtectedRoute><GestionGarantias /></ProtectedRoute>} />
                         </>
                     )}
 

@@ -2,7 +2,7 @@
 class ApiConfig {
   // PC en la red local
   static const String baseUrl = 'http://192.168.100.148:8000';
-
+//static const String baseUrl = 'https://smartsales365-6vm6.onrender.com';
   static Map<String, String> getAuthHeaders(String? token,
       {bool isFormData = false}) {
     final headers = <String, String>{

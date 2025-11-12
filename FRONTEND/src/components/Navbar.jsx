@@ -1,6 +1,6 @@
 // src/components/Navbar.jsx
 import React, { useState, useEffect, useRef } from 'react';
-import { NavLink, Link, useNavigate } from 'react-router-dom'; // ✨ IMPORTANTE: NavLink para estilos 'active'
+import { NavLink, Link, useNavigate } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import { 
@@ -19,12 +19,11 @@ import {
     TicketPercent,
     MessageSquare,
     ShoppingBag,
-    ShieldCheck,
+    ShieldCheck, // Asegúrate de tener este icono
     Heart,
-} from 'lucide-react'; // ✨ Iconos de Lucide
+} from 'lucide-react';
 
-// --- Componente de Enlace de Navegación ---
-// Usa NavLink para obtener 'isActive' y aplicar un estilo activo
+// ... (NavItem, DropdownMenu, DropdownItem, etc. SIN CAMBIOS) ...
 const NavItem = ({ to, children }) => {
     const baseStyle = "text-sm font-medium text-slate-600 hover:text-indigo-600 transition-colors relative";
     const activeStyle = "text-indigo-600 after:content-[''] after:absolute after:-bottom-1 after:left-0 after:right-0 after:h-0.5 after:bg-indigo-600";
@@ -39,8 +38,6 @@ const NavItem = ({ to, children }) => {
     );
 };
 
-// --- ✨ NUEVO: Componente de Menú Desplegable ---
-// Reutilizable para el Menú de Usuario y el Menú de Gestión
 const DropdownMenu = ({ button, children }) => {
     const [isOpen, setIsOpen] = useState(false);
     const dropdownRef = useRef(null);
@@ -57,28 +54,23 @@ const DropdownMenu = ({ button, children }) => {
 
     return (
         <div className="relative" ref={dropdownRef}>
-            {/* El botón que activa el dropdown */}
             {React.cloneElement(button, {
                 onClick: () => setIsOpen(!isOpen),
                 'aria-haspopup': true,
                 'aria-expanded': isOpen
             })}
             
-            {/* Contenido del Dropdown */}
             {isOpen && (
                 <div
                     className="absolute right-0 mt-2 w-64 bg-white rounded-md shadow-lg border border-slate-200 py-1 z-20"
                     role="menu"
                     aria-orientation="vertical"
                 >
-                    {/* Hacemos 'children' clickeables para que cierren el menú */}
                     {React.Children.map(children, child => 
                         React.isValidElement(child) 
                         ? React.cloneElement(child, {
                             onClick: (e) => {
-                                // Ejecuta la función onClick original del hijo (si existe)
                                 child.props.onClick?.(e);
-                                // Cierra el menú
                                 setIsOpen(false);
                             }
                         })
@@ -90,7 +82,6 @@ const DropdownMenu = ({ button, children }) => {
     );
 };
 
-// --- Componente de Fila del Menú ---
 const DropdownItem = ({ to, icon, children, ...props }) => {
     const Icon = icon;
     const content = (
@@ -103,11 +94,9 @@ const DropdownItem = ({ to, icon, children, ...props }) => {
         </span>
     );
     
-    // Si es un enlace, envuélvelo en Link
     if (to) {
         return <Link to={to} {...props}>{content}</Link>;
     }
-    // Si es un botón (ej. Logout), envuélvelo en button
     return <button className="w-full text-left" {...props}>{content}</button>;
 };
 
@@ -144,16 +133,17 @@ export default function Navbar() {
         <header className="bg-white/95 backdrop-blur-sm shadow-sm sticky top-0 z-50 border-b border-slate-200">
             <div className="container mx-auto flex justify-between items-center px-4 h-16 max-w-7xl">
 
-                {/* --- Logo y Navegación Principal --- */}
+                {/* --- Logo y Navegación Principal (Sin cambios) --- */}
                 <div className="flex items-center space-x-8">
+                    {/* ... (tu logo) ... */}
                     <Link
                         to={isAuthenticated ? "/catalogo" : "/"}
                         className="text-xl font-bold text-slate-800 hover:text-indigo-600 transition-colors"
                     >
                         SmartSales<span className="text-indigo-600">365</span>
                     </Link>
-
-                    {/* ✨ MEJORA: Navegación principal limpia (solo enlaces públicos/cliente) */}
+                    
+                    {/* --- Navegación (Sin cambios) --- */}
                     <nav className="hidden md:flex items-center space-x-6 h-16">
                         {isAuthenticated && (
                             <>
@@ -161,9 +151,9 @@ export default function Navbar() {
                                 <NavItem to="/consultar-garantia">Garantía</NavItem>
                                 
                                 {userRole === 'CLI' && (
-                                  <>
-                                    <NavItem to="/mis-compras">Mis Compras</NavItem>
-                                    <NavItem to="/favoritos">Favoritos</NavItem>
+                                    <>
+                                        <NavItem to="/mis-compras">Mis Compras</NavItem>
+                                        <NavItem to="/favoritos">Favoritos</NavItem>
                                     </>
                                 )}
                             </>
@@ -171,12 +161,12 @@ export default function Navbar() {
                     </nav>
                 </div>
 
-                {/* --- Acciones del Usuario --- */}
+                {/* --- Acciones del Usuario (ACTUALIZADO) --- */}
                 <div className="flex items-center space-x-2 sm:space-x-4">
                     
                     {isAuthenticated ? (
                         <>
-                            {/* --- ✨ NUEVO: Menú "Gestión" (Solo Admin/Vendedor) --- */}
+                            {/* --- Menú "Gestión" (ACTUALIZADO) --- */}
                             {(userRole === 'ADM' || userRole === 'VEN') && (
                                 <DropdownMenu 
                                     button={
@@ -189,6 +179,10 @@ export default function Navbar() {
                                 >
                                     <DropdownItem to="/dashboard" icon={LayoutDashboard}>Dashboard</DropdownItem>
                                     <DropdownItem to="/pedidos" icon={Truck}>Gestión de Pedidos</DropdownItem>
+                                    
+                                    {/* ✨ AÑADIR ESTA LÍNEA ✨ */}
+                                    <DropdownItem to="/admin/garantias" icon={ShieldCheck}>Gestión de Garantías</DropdownItem>
+                                    
                                     <DropdownItem to="/historial-ventas" icon={History}>Historial de Ventas</DropdownItem>
                                     <DropdownDivider />
                                     <DropdownItem to="/productos" icon={Package}>Productos</DropdownItem>
@@ -207,7 +201,7 @@ export default function Navbar() {
                                 </DropdownMenu>
                             )}
 
-                            {/* --- Carrito de Compras --- */}
+                            {/* --- Carrito (Sin cambios) --- */}
                             <Link
                                 to="/carrito"
                                 className="relative p-2 rounded-full text-slate-600 hover:bg-slate-100 hover:text-indigo-600 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
@@ -221,7 +215,7 @@ export default function Navbar() {
                                 )}
                             </Link>
 
-                            {/* --- ✨ MEJORA: Menú de Perfil (con Dropdown reutilizado) --- */}
+                            {/* --- Menú de Perfil (Sin cambios) --- */}
                             <DropdownMenu
                                 button={
                                     <button
@@ -246,8 +240,9 @@ export default function Navbar() {
                             </DropdownMenu>
                         </>
                     ) : (
-                        // --- Botones para visitante ---
+                        // --- Botones para visitante (Sin cambios) ---
                         <div className="flex items-center space-x-2">
+                            {/* ... (login y register buttons) ... */}
                             <Link
                                 to="/login"
                                 className="px-4 py-2 text-sm text-slate-600 font-semibold hover:text-indigo-600 transition-colors rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"

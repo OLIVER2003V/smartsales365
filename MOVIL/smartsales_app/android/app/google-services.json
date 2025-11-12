@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "974696182279",
+    "project_id": "smartsales-8e858",
+    "storage_bucket": "smartsales-8e858.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:974696182279:android:0a4ce74797616136def0a2",
+        "android_client_info": {
+          "package_name": "com.example.smartsales_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBR_7fWn4nY--0FLXB2bYMmcFIDpOSf-VU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

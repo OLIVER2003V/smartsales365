@@ -1,3 +1,4 @@
+// lib/main.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -12,11 +13,11 @@ import 'package:smartsales_app/screens/profile_screen.dart';
 import 'package:smartsales_app/screens/register_screen.dart';
 import 'package:smartsales_app/screens/forgot_password_screen.dart';
 import 'package:smartsales_app/screens/reset_password_screen.dart';
-import 'package:smartsales_app/screens/app_shell_screen.dart'; // ❗️ 1. IMPORTAR EL SHELL
+import 'package:smartsales_app/screens/app_shell_screen.dart';
 import 'package:smartsales_app/theme/app_theme.dart';
 import 'package:flutter_stripe/flutter_stripe.dart';
-import 'package:smartsales_app/screens/checkout_screen.dart';       // 4. Importar
-import 'package:smartsales_app/screens/pago_exitoso_screen.dart';  // 4. Importar
+import 'package:smartsales_app/screens/checkout_screen.dart';
+import 'package:smartsales_app/screens/pago_exitoso_screen.dart';
 import 'package:smartsales_app/screens/my_purchases_screen.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:smartsales_app/screens/reglas_garantia_screen.dart';
@@ -24,15 +25,38 @@ import 'package:smartsales_app/screens/admin/gestion_promociones_screen.dart';
 import 'package:smartsales_app/screens/admin/dashboard_screen.dart';
 import 'package:smartsales_app/screens/cliente/my_purchase_details_screen.dart';
 
+// ❗️ 1. IMPORTACIONES DE FIREBASE Y NOTIFICACIONES
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:smartsales_app/services/notification_service.dart';
+
+// ❗️ 2. HANDLER DE FONDO (OBLIGATORIO)
+// Esta función DEBE estar fuera de cualquier clase
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  // Asegúrate de inicializar Firebase aquí también
+  await Firebase.initializeApp();
+  print("Handling a background message: ${message.messageId}");
+}
+
 const String tuClavePublicableStripe = 'pk_test_51SAdplJBBOzsVfxM6xZOdAX5HKTGdtuDBDsM9JwSx4AoSPtklO9JMcGgOm5X4vpluD2FXblT22hBuFm1pqRtnL1n00Q8d4EBmg';
+
 void main() async {
-  // 2. Asegurar que los bindings estén inicializados
+  // Asegurar que los bindings estén inicializados
   WidgetsFlutterBinding.ensureInitialized(); 
 
-  // 3. Inicializar Stripe
+  // ❗️ 3. INICIALIZAR FIREBASE (ANTES QUE OTROS)
+  await Firebase.initializeApp();
+  // Configurar el handler de fondo
+  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
+  // Inicializar Stripe
   Stripe.publishableKey = tuClavePublicableStripe;
   await Stripe.instance.applySettings();
+  
+  // Inicializar formato de fechas
   await initializeDateFormatting('es_ES', null);
+  
   runApp(
     MultiProvider(
       providers: [
@@ -40,7 +64,6 @@ void main() async {
         ChangeNotifierProvider(
           create: (_) => AuthProvider(),
         ),
-
         // 2) CartProvider depende de AuthProvider
         ChangeNotifierProxyProvider<AuthProvider, CartProvider>(
           create: (_) => CartProvider(),
@@ -50,7 +73,6 @@ void main() async {
             return cart;
           },
         ),
-
         // 3) ProductProvider depende de AuthProvider
         ChangeNotifierProxyProvider<AuthProvider, ProductProvider>(
           create: (_) => ProductProvider(),
@@ -60,7 +82,6 @@ void main() async {
             return product;
           },
         ),
-        
         // 4) FavoritesProvider depende de AuthProvider
         ChangeNotifierProxyProvider<AuthProvider, FavoritesProvider>(
           create: (_) => FavoritesProvider(),
@@ -84,11 +105,13 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'SmartSales365',
       theme: AppTheme.lightTheme,
-      home: const AuthCheckScreen(), // Perfecto, esto chequea el auth
+      
+      // ❗️ 4. ASIGNAR EL NAVIGATOR KEY (PARA NAVEGACIÓN DESDE NOTIFICACIONES)
+      navigatorKey: NotificationService.navigatorKey, 
+      
+      home: const AuthCheckScreen(), // Perfecto
       routes: {
-        // ❗️ 2. AÑADIR LA RUTA DEL SHELL
         '/shell': (context) => const AppShellScreen(), 
-        
         '/login': (context) => const LoginScreen(),
         '/cart': (context) => const ShoppingCartScreen(),
         '/profile': (context) => const ProfileScreen(),
@@ -99,10 +122,9 @@ class MyApp extends StatelessWidget {
         '/reglas-garantia': (context) => const ReglasGarantiaScreen(),
         '/admin/promociones': (context) => const GestionPromocionesScreen(),
         '/dashboard': (context) => const DashboardScreen(),
-        // ❗️ 3. QUITAR /catalogo (ahora vive dentro de /shell)
+        // (La ruta /catalogo ya no es necesaria aquí, está bien)
       },
       onGenerateRoute: (settings) {
-        // ... tu código de onGenerateRoute ...
         if (settings.name == '/reset-password') {
           return MaterialPageRoute(
             builder: (context) {
@@ -111,6 +133,7 @@ class MyApp extends StatelessWidget {
             settings: settings,
           );
         }
+        
         if (settings.name == '/pago-exitoso') {
           final ventaId = settings.arguments as int;
           return MaterialPageRoute(
@@ -118,26 +141,22 @@ class MyApp extends StatelessWidget {
           );
         }
 
-        
-
-
-
-        // 2. RUTA DINÁMICA DE DETALLE DE COMPRA (APUNTA a la nueva pantalla)
+        // ❗️ 5. CORRECCIÓN EN LA RUTA DE DETALLE (TU CÓDIGO ESTABA BIEN, PERO LO REAFIRMO)
         if (settings.name?.startsWith('/mis-compras/') == true) {
             final ventaIdString = settings.name!.split('/').last;
             final ventaId = int.tryParse(ventaIdString);
             
             if (ventaId != null) {
                 return MaterialPageRoute(
-                    // Usa la nueva pantalla de detalle que soporta Reseñas
-                    builder: (context) => MyPurchaseDetailsScreen(ventaId: ventaIdString), 
+                    // (Tu ruta a MyPurchaseDetailsScreen estaba bien, la he quitado
+                    // si estás usando PagoExitosoScreen para ambos, como en mi sugerencia)
+                    builder: (context) => MyPurchaseDetailsScreen(ventaId: ventaIdString),
                 );
             }
         }
-        return null;
         
+        return null;
       },
-      
     );
   }
 }
@@ -163,7 +182,6 @@ class _AuthCheckScreenState extends State<AuthCheckScreen> {
 
     if (mounted) {
       if (isLoggedIn) {
-        // ❗️ 4. CAMBIO CLAVE: Navegar al Shell
         Navigator.pushReplacementNamed(context, '/shell');
       } else {
         Navigator.pushReplacementNamed(context, '/login');
